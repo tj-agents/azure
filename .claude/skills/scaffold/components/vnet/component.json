@@ -1,0 +1,5 @@
+{
+  "order": 10,
+  "when": "vnet",
+  "description": "VNet and subnets; enables private networking."
+}

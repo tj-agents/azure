@@ -1,0 +1,5 @@
+variable "postgres_sku" {
+  type        = string
+  default     = "B_Standard_B1ms"
+  description = "Postgres Flexible Server SKU."
+}

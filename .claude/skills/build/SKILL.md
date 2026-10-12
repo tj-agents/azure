@@ -1,6 +1,6 @@
 ---
 name: build
-description: Tommy's agreed Azure build — toolchain pin, build configuration, the verification gate and CI. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
+description: Tommy's agreed Azure build — Terraform and provider pins, the lock file, the provider block and the fmt, init and validate gate. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
 kind: contract
 domain: azure
 profile: core

@@ -47,15 +47,33 @@ Done when:
 - 2026-10-12: Azure is surveyed through a read-only Azure MCP server for reconnaissance only. Practice and
   scaffold targets are the personal account.
 - 2026-10-12: `new --into` is required (shared contract § Composing scaffolds in one repository).
+- 2026-10-12, Tommy: approved all 27 rules in [PROPOSAL.md](PROPOSAL.md), including the new contracts
+  `azure:deployment` and `azure:security`, Entra-only Postgres and plan-then-apply CI.
+- 2026-10-12, Tommy: approved scaffold v1 as proposed, with presets `foundation` and `web-api`.
+- 2026-10-12, Tommy: microservice-communication standards belong in a future `dotnet:microservice-messaging`
+  contract. This package owns only the Service Bus resources, and nothing is created for it here.
+- 2026-10-12, Tommy: the repository is public so CI runs free, like its siblings.
 
 ## Progress
 
 - 2026-10-12: repository generated from kit 1.2.1; sync check and `kit:check` pass.
+- 2026-10-12: the repository is public and main CI is green on Windows, Ubuntu and hosts.
+- 2026-10-12: on `Feature/BasicStandards`, commit `7f7bb1b` records the approved rules in structure, style,
+  build, deployment and security, plus the direction goal and skill tree. `kit:check` and the skill
+  references pass.
+- 2026-10-12: scaffold implementation dispatched at lane L4 against [SCAFFOLD_SPEC.md](SCAFFOLD_SPEC.md).
+- 2026-10-12: commit `57ad433` adds scaffold v1. The full suite with the Terraform gate passed once, and a
+  rerun after the template fixes was stopped by host memory pressure, so the gate now runs in CI. PR
+  https://github.com/tj-agents/azure/pull/1 is open. The marketplace catalog commit is ready on
+  `Feature/AzurePlugin` in the marketplace repository.
+- 2026-10-12: an independent review lens raised three findings, all fixed in `7e15ed2`:
+  - partial writes after an I/O error are now rolled back;
+  - `ephemeral_id` is capped at 6 so Container App names fit 32;
+  - the README now covers the OIDC immutable-subject opt-in for older repositories.
+  CI `ci` and `terraform` (the Terraform gate on Windows and Ubuntu, 19 tests) are green. Adopted the
+  standing delivery authorization; auto-merge is enabled on the repository.
 
 ## Next Steps
 
-1. Survey the reference estates and put the proposed contract rules, the scaffold option schema and presets,
-   and a microservice-communication packaging recommendation to Tommy in one batched question.
-2. On a feature branch, write the contracts, direction and scaffold, with tests and a toolchain gate. Then
-   review, open the PR and merge.
-3. Open the marketplace catalog PR.
+1. Merge PR 1 once this head is green.
+2. Open the marketplace catalog PR and merge it once green.

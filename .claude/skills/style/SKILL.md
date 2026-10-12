@@ -1,6 +1,6 @@
 ---
 name: style
-description: Tommy's agreed Azure style — naming, formatting, comments and lint policy. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
+description: Tommy's agreed Azure style — resource naming, region codes, tags, formatting and variable declarations. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
 kind: contract
 domain: azure
 profile: core

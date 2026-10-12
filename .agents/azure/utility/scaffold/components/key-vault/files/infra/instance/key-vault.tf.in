@@ -1,0 +1,5 @@
+resource "azurerm_role_assignment" "key_vault_secrets_user" {
+  scope                = data.azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.workload.principal_id
+}

@@ -1,0 +1,39 @@
+variable "env" {
+  type        = string
+  description = "Short environment code."
+
+  validation {
+    condition     = can(regex("^[a-z]{2,5}$", var.env))
+    error_message = "env must be 2-5 lowercase letters."
+  }
+}
+
+variable "region" {
+  type        = string
+  description = "Short region code."
+
+  validation {
+    condition     = contains(["uks", "ukw", "weu", "neu"], var.region)
+    error_message = "region must be one of uks, ukw, weu, neu."
+  }
+}
+
+variable "github_owner" {
+  type        = string
+  description = "GitHub owner login for the deploy identity's federated credential."
+}
+
+variable "github_owner_id" {
+  type        = string
+  description = "GitHub owner id for the deploy identity's federated credential."
+}
+
+variable "github_repository" {
+  type        = string
+  description = "GitHub repository name for the deploy identity's federated credential."
+}
+
+variable "github_repository_id" {
+  type        = string
+  description = "GitHub repository id for the deploy identity's federated credential."
+}

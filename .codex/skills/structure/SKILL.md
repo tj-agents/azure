@@ -1,6 +1,6 @@
 ---
 name: structure
-description: Tommy's agreed Azure project structure — repository and module layout, visibility and wiring. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
+description: Tommy's agreed Azure project structure — the foundation and instance Terraform roots, how they find each other, file layout, ephemeral instances and where Service Bus topics and subscriptions live. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
 kind: contract
 domain: azure
 profile: core

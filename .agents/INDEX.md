@@ -5,9 +5,11 @@ Generated from `.agents/<plugin>/<kind>/<family>/<member>/SKILL.md`; a skill's n
 ## azure
 
 - `build` — contract — core — `.agents/azure/contract/build/SKILL.md`
+- `deployment` — contract — core — `.agents/azure/contract/deployment/SKILL.md`
 - `domain-design` — contract — core — `.agents/azure/contract/domain-design/SKILL.md`
 - `errors` — contract — core — `.agents/azure/contract/errors/SKILL.md`
 - `libraries` — contract — core — `.agents/azure/contract/libraries/SKILL.md`
+- `security` — contract — core — `.agents/azure/contract/security/SKILL.md`
 - `structure` — contract — core — `.agents/azure/contract/structure/SKILL.md`
 - `style` — contract — core — `.agents/azure/contract/style/SKILL.md`
 - `testing` — contract — core — `.agents/azure/contract/testing/SKILL.md`

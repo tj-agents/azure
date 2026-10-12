@@ -1,0 +1,10 @@
+resource "azurerm_service_plan" "main" {
+  name                = "${local.prefix}-asp"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+
+  os_type  = "Linux"
+  sku_name = var.app_service_sku
+
+  tags = local.tags
+}
