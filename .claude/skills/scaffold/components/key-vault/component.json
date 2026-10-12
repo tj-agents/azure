@@ -1,0 +1,5 @@
+{
+  "order": 40,
+  "when": "key_vault",
+  "description": "Key Vault in RBAC mode, with a secrets-user role for the workload identity."
+}

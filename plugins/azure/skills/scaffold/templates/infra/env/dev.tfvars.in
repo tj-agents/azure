@@ -1,0 +1,7 @@
+env    = "dev"
+region = "uks"
+
+github_owner         = "changeme"
+github_owner_id      = "0"
+github_repository    = "changeme"
+github_repository_id = "0"

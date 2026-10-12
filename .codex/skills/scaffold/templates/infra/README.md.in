@@ -1,0 +1,62 @@
+# __NAME__ infrastructure
+
+Two Terraform roots: `foundation` (slow, shared resources) and `instance` (per-deployment resources). See
+`azure:structure` for why they're split.
+
+## Bootstrap
+
+Foundation starts with local state, using a personal Azure account kept isolated from any other CLI session:
+
+```sh
+export AZURE_CONFIG_DIR=$(mktemp -d)
+az login
+cd infra/foundation
+terraform init
+terraform apply -var-file=../env/dev.tfvars
+```
+
+Then migrate into the state storage account `apply` just created:
+
+```sh
+cat > backend.auto.tfvars.json <<JSON
+{}
+JSON
+terraform init -migrate-state \
+  -backend-config="resource_group_name=$(terraform output -raw resource_group_name)" \
+  -backend-config="storage_account_name=$(terraform output -raw state_storage_account_name)" \
+  -backend-config="container_name=tfstate" \
+  -backend-config="key=__NAME__/foundation.tfstate"
+```
+
+`instance` uses the same account with key `__NAME__/instance.tfstate`.
+
+## Repository variables
+
+The workflow in `.github/workflows/infra.yml` reads these GitHub Actions variables, set once the foundation
+has deployed:
+
+- `AZURE_FOUNDATION_READY` — `"true"` once the state account above exists; gates the `plan` and `apply` jobs.
+- `AZURE_CLIENT_ID` — the deploy identity's client id (`terraform output -raw deploy_identity_client_id`).
+- `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` — the target tenant and subscription.
+- `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT` — the values used in the migration above.
+
+Update `infra/env/dev.tfvars` with the real GitHub owner, repository and their numeric ids:
+
+```sh
+gh api repos/<owner>/<repo> --jq '.owner.id, .id'
+```
+
+The first line is `github_owner_id`, the second is `github_repository_id`.
+
+Service Bus subscriptions keep their `$Default` rule in this version; remove it by hand if a subscription
+must receive only its `handled-types` messages.
+
+## Offline gate
+
+Run this for each root before pushing, and in CI without any Azure login:
+
+```sh
+terraform fmt -check -recursive
+terraform init -backend=false
+terraform validate
+```

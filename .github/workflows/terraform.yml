@@ -1,0 +1,30 @@
+name: terraform
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.16.5"
+          terraform_wrapper: false
+      - name: Run the scaffold's Terraform gate
+        shell: bash
+        env:
+          AZURE_SCAFFOLD_TERRAFORM: "1"
+        run: python -B -m unittest discover -s .agents/tests -p "test_scaffold.py"

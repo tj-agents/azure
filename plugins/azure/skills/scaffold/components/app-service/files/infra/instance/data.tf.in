@@ -1,0 +1,4 @@
+data "azurerm_service_plan" "main" {
+  name                = "${local.prefix}-asp"
+  resource_group_name = data.azurerm_resource_group.main.name
+}

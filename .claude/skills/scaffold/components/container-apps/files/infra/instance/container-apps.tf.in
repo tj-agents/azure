@@ -1,0 +1,81 @@
+resource "azurerm_role_assignment" "acr_pull" {
+  scope                = data.azurerm_container_registry.main.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_user_assigned_identity.workload.principal_id
+}
+
+resource "time_sleep" "acr_pull_propagation" {
+  create_duration = "60s"
+
+  depends_on = [azurerm_role_assignment.acr_pull]
+}
+
+resource "azurerm_container_app" "main" {
+  name                         = "${local.instance_prefix}-ca"
+  resource_group_name          = data.azurerm_resource_group.main.name
+  container_app_environment_id = data.azurerm_container_app_environment.main.id
+  revision_mode                = "Single"
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.workload.id]
+  }
+
+  registry {
+    server   = data.azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.workload.id
+  }
+
+  ingress {
+    external_enabled = true
+    target_port      = 8080
+
+    traffic_weight {
+      latest_revision = true
+      percentage      = 100
+    }
+  }
+
+  template {
+    container {
+      name   = "main"
+      image  = var.container_image
+      cpu    = 0.5
+      memory = "1Gi"
+
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.workload.client_id
+      }
+
+      env {
+        name  = "APPLICATIONINSIGHTS_CONNECTION_STRING"
+        value = data.azurerm_application_insights.main.connection_string
+      }
+
+      env {
+        name  = "OTEL_SERVICE_NAME"
+        value = "__NAME__"
+      }
+
+      dynamic "env" {
+        for_each = local.database_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+    }
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length("${local.instance_prefix}-ca") <= 32
+      error_message = "Container App name must be 32 characters or fewer."
+    }
+  }
+
+  depends_on = [time_sleep.acr_pull_propagation]
+}
