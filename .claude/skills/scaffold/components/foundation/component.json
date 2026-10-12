@@ -1,0 +1,5 @@
+{
+  "order": 0,
+  "when": "always",
+  "description": "Resource group, state storage, observability and the deploy identity; always selected."
+}

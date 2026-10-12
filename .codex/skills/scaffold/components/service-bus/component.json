@@ -1,0 +1,5 @@
+{
+  "order": 50,
+  "when": "messaging=service-bus",
+  "description": "Service Bus namespace and topics, with this workload's subscriptions and role assignments."
+}

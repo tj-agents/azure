@@ -1,0 +1,4 @@
+data "azurerm_key_vault" "main" {
+  name                = substr("${replace(local.prefix, "-", "")}kv", 0, 24)
+  resource_group_name = data.azurerm_resource_group.main.name
+}

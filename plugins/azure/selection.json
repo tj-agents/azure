@@ -4,9 +4,11 @@
   "profiles": {
     "core": [
       "build",
+      "deployment",
       "domain-design",
       "errors",
       "libraries",
+      "security",
       "structure",
       "style",
       "testing"
@@ -24,6 +26,20 @@
   "skills": [
     {
       "name": "build",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "deployment",
       "kind": "contract",
       "profile": "core",
       "applicability": [
@@ -126,6 +142,20 @@
       "profile": "scaffold",
       "applicability": [
         "new Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "security",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
       ],
       "requires": [
         "azure"

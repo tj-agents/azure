@@ -1,0 +1,4 @@
+data "azurerm_postgresql_flexible_server" "main" {
+  name                = "${local.prefix}-psql"
+  resource_group_name = data.azurerm_resource_group.main.name
+}

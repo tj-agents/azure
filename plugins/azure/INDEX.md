@@ -1,9 +1,11 @@
 # azure package capabilities
 
 - `build` — contract — core
+- `deployment` — contract — core
 - `domain-design` — contract — core
 - `errors` — contract — core
 - `libraries` — contract — core
+- `security` — contract — core
 - `structure` — contract — core
 - `style` — contract — core
 - `testing` — contract — core

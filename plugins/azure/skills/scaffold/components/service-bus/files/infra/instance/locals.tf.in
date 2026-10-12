@@ -1,0 +1,4 @@
+locals {
+  topics        = __TOPICS_HCL__
+  subscriptions = __SUBSCRIPTIONS_HCL__
+}

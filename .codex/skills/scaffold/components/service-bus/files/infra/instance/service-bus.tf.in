@@ -1,0 +1,36 @@
+resource "azurerm_servicebus_subscription" "main" {
+  for_each = toset(local.subscriptions)
+
+  name     = "__NAME__-${each.value}"
+  topic_id = data.azurerm_servicebus_topic.topic[each.value].id
+
+  max_delivery_count                        = 10
+  lock_duration                             = "PT1M"
+  dead_lettering_on_message_expiration      = true
+  dead_lettering_on_filter_evaluation_error = true
+}
+
+resource "azurerm_servicebus_subscription_rule" "handled_types" {
+  for_each = toset(local.subscriptions)
+
+  name            = "handled-types"
+  subscription_id = azurerm_servicebus_subscription.main[each.value].id
+  filter_type     = "SqlFilter"
+  sql_filter      = join(" OR ", [for type in var.service_bus_handled_types : "type = '${type}'"])
+}
+
+resource "azurerm_role_assignment" "service_bus_receiver" {
+  for_each = toset(local.subscriptions)
+
+  scope                = azurerm_servicebus_subscription.main[each.value].id
+  role_definition_name = "Azure Service Bus Data Receiver"
+  principal_id         = azurerm_user_assigned_identity.workload.principal_id
+}
+
+resource "azurerm_role_assignment" "service_bus_sender" {
+  for_each = toset(local.topics)
+
+  scope                = data.azurerm_servicebus_topic.topic[each.value].id
+  role_definition_name = "Azure Service Bus Data Sender"
+  principal_id         = azurerm_user_assigned_identity.workload.principal_id
+}

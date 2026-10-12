@@ -1,0 +1,6 @@
+{
+  "host": "container-apps",
+  "database": "postgres-flexible",
+  "key_vault": true,
+  "vnet": true
+}

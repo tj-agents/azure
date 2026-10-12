@@ -1,0 +1,5 @@
+variable "private_networking" {
+  type        = bool
+  default     = true
+  description = "Keep data services off the public network, routed through private endpoints."
+}
