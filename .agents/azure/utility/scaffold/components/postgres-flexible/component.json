@@ -1,5 +1,5 @@
 {
   "order": 30,
-  "when": "database=postgres-flexible",
-  "description": "Postgres Flexible Server, Entra-only, with the workload's database and migrator identity."
+  "when": "has_database",
+  "description": "Postgres Flexible Server, Entra-only, with the instance's database and migrator identity."
 }

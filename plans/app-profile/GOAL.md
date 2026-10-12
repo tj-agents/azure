@@ -127,6 +127,60 @@ The shared scaffold contract's `--into` section is on hold for the same reason (
   - OTLP tracing only;
   - no health checks, no Azure.Identity and no container publish.
 - 2026-10-12: plan written; Tommy answered Q1–Q3 (Decisions).
+- 2026-10-12: the coordinator has the contract revision. Phase A was dispatched at L4 against
+  [PHASE_A_SPEC.md](PHASE_A_SPEC.md), with three additions sent mid-run. [PHASE_B_SPEC.md](PHASE_B_SPEC.md)
+  is written.
+- 2026-10-12: Phase B was dispatched at L4 in parallel, in `dotnet/.worktrees/Feature-AzureHosting` from
+  `693618d`, against the spec with a fake azure script. The real end-to-end check waits for Phase A's merge.
+  Each repository has one writer, and builds and Terraform runs one at a time because of host memory.
+- 2026-10-12: side items, owned elsewhere:
+  - core PR #227 records Tommy's 2:1 Codex/Claude default-host debt;
+  - the core Stop-hook false `binding-head-changed` (it compares `head` while the binding stores
+    `remote_head_sha`) went to Codex at L4 in `core/.worktrees/Fix-ContinuationStopBindingHead`. The launch
+    pointer's paths were garbled by `printf` escapes, but the tab's working directory and the goal's
+    relative path are correct, so it was not relaunched.
+- 2026-10-12 about 21:27: Tommy's PC crashed and interrupted every agent. Reconciled after the restart:
+  - Phase A had 22 uncommitted changed paths in this worktree; resumed the same agent from its transcript.
+  - The Phase B worktree was clean at `693618d`; resumed it from the start, with code and unittests only and
+    no `dotnet build` until Phase A finishes, because the host is under load.
+  - core PR #227: the review found three record-shape and quote issues, fixed in `0b81254`. A fresh lens
+    approved, CI was green, and it merged as `48ab568`. The binding was released and the worktree and branch
+    removed.
+  - core PR #230 (the stop-hook fix) is open, owned by the Codex successor.
+- 2026-10-12 after the restart:
+  - Phase B code is done (34 unittests, sync and kit check pass), including Functions container support with
+    the MCR tag `4-dotnet-isolated10.0` verified and azure options read through `options --schema`. Its one
+    dotnet build hasn't run yet.
+  - **Host gate:** 0.4 GB free and commit at 54.7 of 55.3 GB, with the nonpaged kernel pool at 16 GB, a driver
+    leak and the likely cause of the 21:27 crash. All Terraform and dotnet builds are paused.
+  - Resolver: Tommy, by rebooting to clear the pool. Resume condition: commit well below the limit
+    (`\Memory\Committed Bytes` under about 40 GB) and the nonpaged pool under 2 GB.
+  - Meanwhile only non-build work continues. CI can run the full gates on GitHub runners once the PRs open.
+- 2026-10-12:
+  - Phase B is committed locally as `22bc9e6` on `Feature/AzureHosting`; its PR follows Phase A's merge.
+  - sandbox-dotnet (`tomjseery/sandbox-dotnet`, owner session `repos-4c`) exists, seeded from azure v1. Its
+    `infra/SCAFFOLD_GAPS.md` items 5, 7 and 8 were added to Phase A as addition 5.
+  - Notify `repos-4c` when each PR merges.
+- 2026-10-13: **pending side workstream (standards defect).** core `continuation_stop.py` evaluates the
+  delivery binding in the session's launch directory and never checks which session owns it.
+  - Crash recovery started this session in Codex's `core/.worktrees/Fix-ContinuationStopBindingHead`
+    (PR #230), so every Stop demands "Initialize persistent-workflow for the active delivery binding". Taking
+    over another writer's PR would make this session a second owner.
+  - Handoff is blocked by host capacity: C: has 0.23 GB free, commit is 55.1 of 55.3 GB, and the nonpaged pool
+    is 19.1 GB.
+  - Resolver: Tommy, who frees disk and reboots. Resume condition: C: has at least 20 GB free and commit is
+    under 40 GB. Then launch one Codex L4 bounded side workstream in a fresh core worktree with this defect
+    as its goal.
+- 2026-10-13: the PC crashed again at about 23:09 (a Bitdefender kernel memory leak) and was rebooted. The
+  host is healthy: 11.7 GB free and commit at 20.6 of 43.5 GB.
+  - New limit from Tommy: at most 7 agent sessions on this machine, so launch no extra CLI sessions. The
+    stop-hook ownership side workstream waits for session capacity.
+  - Phase A's per-workload messaging (`publishes`/`consumes` with least-privilege roles) landed before the
+    crash; the flat `subscriptions` option is gone.
+  - Fixed inline: the stale scaffold mirror, the App Service gate case now uses vnet + key_vault, and the
+    messaging gate case uses the per-workload fields.
+  - Verified: sync `-Check`, `kit:check` 1.2.1, and 55 tests (50 plus 5 Terraform gate cases, all green
+    locally against Terraform 1.15.8 and azurerm 5.x).
 
 ## Next Steps
 

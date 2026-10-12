@@ -1,0 +1,5 @@
+{
+  "order": 25,
+  "when": "functions_flex",
+  "description": "Flex Consumption plan, and a Function App per `functions` workload hosted there."
+}

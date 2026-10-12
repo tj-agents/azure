@@ -1,0 +1,5 @@
+{
+  "order": 5,
+  "when": "always",
+  "description": "One user-assigned identity per workload, the `images` variable, and `locals.workloads` / `locals.settings` from the profile."
+}

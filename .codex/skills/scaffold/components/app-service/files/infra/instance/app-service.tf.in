@@ -1,59 +1,81 @@
 resource "azurerm_linux_web_app" "main" {
-  name                = "${local.instance_prefix}-app"
+  for_each = local.app_service_workloads
+
+  name                = "${local.instance_prefix}-${each.key}-app"
   resource_group_name = data.azurerm_resource_group.main.name
   location            = data.azurerm_resource_group.main.location
   service_plan_id     = data.azurerm_service_plan.main.id
 
   https_only = true
 
+@if vnet
+  virtual_network_subnet_id = data.azurerm_subnet.app.id
+@endif
+
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.workload.id]
+    identity_ids = [azurerm_user_assigned_identity.workload[each.key].id]
   }
 
   site_config {
     always_on                         = true
-    health_check_path                 = "/health"
+    health_check_path                 = each.value.probes.readiness
     health_check_eviction_time_in_min = 5
+@if vnet
+    vnet_route_all_enabled            = true
+@endif
+
+    application_stack {
+      dotnet_version      = each.value.runtime_name == "dotnet" ? each.value.runtime_version : null
+      node_version        = each.value.runtime_name == "node" ? each.value.runtime_version : null
+      python_version      = each.value.runtime_name == "python" ? each.value.runtime_version : null
+      java_version        = each.value.runtime_name == "java" ? each.value.runtime_version : null
+      java_server         = each.value.runtime_name == "java" ? "JAVA" : null
+      java_server_version = each.value.runtime_name == "java" ? each.value.runtime_version : null
+    }
   }
 
-  app_settings = merge(
-    {
-      AZURE_CLIENT_ID                       = azurerm_user_assigned_identity.workload.client_id
-      APPLICATIONINSIGHTS_CONNECTION_STRING = data.azurerm_application_insights.main.connection_string
-      OTEL_SERVICE_NAME                     = "__NAME__"
-    },
-    local.database_env
-  )
+  app_settings = local.settings[each.key]
 
   tags = local.tags
 }
 
 resource "azurerm_linux_web_app_slot" "staging" {
+  for_each = local.app_service_workloads
+
   name           = "staging"
-  app_service_id = azurerm_linux_web_app.main.id
+  app_service_id = azurerm_linux_web_app.main[each.key].id
 
   https_only = true
 
+@if vnet
+  virtual_network_subnet_id = data.azurerm_subnet.app.id
+@endif
+
   identity {
     type         = "UserAssigned"
-    identity_ids = [azurerm_user_assigned_identity.workload.id]
+    identity_ids = [azurerm_user_assigned_identity.workload[each.key].id]
   }
 
   site_config {
     always_on                         = true
-    health_check_path                 = "/health"
+    health_check_path                 = each.value.probes.readiness
     health_check_eviction_time_in_min = 5
+@if vnet
+    vnet_route_all_enabled            = true
+@endif
+
+    application_stack {
+      dotnet_version      = each.value.runtime_name == "dotnet" ? each.value.runtime_version : null
+      node_version        = each.value.runtime_name == "node" ? each.value.runtime_version : null
+      python_version      = each.value.runtime_name == "python" ? each.value.runtime_version : null
+      java_version        = each.value.runtime_name == "java" ? each.value.runtime_version : null
+      java_server         = each.value.runtime_name == "java" ? "JAVA" : null
+      java_server_version = each.value.runtime_name == "java" ? each.value.runtime_version : null
+    }
   }
 
-  app_settings = merge(
-    {
-      AZURE_CLIENT_ID                       = azurerm_user_assigned_identity.workload.client_id
-      APPLICATIONINSIGHTS_CONNECTION_STRING = data.azurerm_application_insights.main.connection_string
-      OTEL_SERVICE_NAME                     = "__NAME__"
-    },
-    local.database_env
-  )
+  app_settings = local.settings[each.key]
 
   tags = local.tags
 }

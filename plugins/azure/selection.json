@@ -141,7 +141,7 @@
       "kind": "utility",
       "profile": "scaffold",
       "applicability": [
-        "new Azure projects"
+        "new or existing Azure projects driven by an app profile"
       ],
       "requires": [
         "azure"

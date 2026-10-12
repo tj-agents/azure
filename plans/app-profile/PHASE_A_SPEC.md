@@ -190,6 +190,22 @@ Keep the OIDC immutable-subject note and the `$Default` note.
   - a messaging case using a `servicebus.namespace` token.
 - Use a temporary `TF_PLUGIN_CACHE_DIR`, and run the cases sequentially.
 
+## Additions (2026-10-12, sent to the writer mid-run)
+
+1. The deploy job also exports `REGISTRY` (the login server) and `REPOSITORY` (`<name>-<id>`), with
+   `IMAGE=$REGISTRY/$REPOSITORY:$TAG`.
+2. `build` may contain both `image` and `package`; azure uses the one the selected host needs.
+3. A workload may carry its own `settings`, merged over the top-level ones (the workload wins). The migration
+   job uses only the top-level settings.
+4. `options --schema` prints JSON `{option: {type, allowed?, default, description}}`. It is the published
+   way for a driving stack to discover azure's options; callers never read `options.json`.
+5. Evidence from `sandbox-dotnet/infra/SCAFFOLD_GAPS.md`:
+   - With `vnet`: App Service gets an `app` subnet (10.0.4.0/24) delegated to `Microsoft.Web/serverFarms`
+     plus VNet integration on the app and its slot. Flex Consumption gets a `functions` subnet
+     (10.0.3.0/24) delegated to `Microsoft.App/environments`.
+   - The Terraform principal gets `Key Vault Secrets Officer`.
+   - A resource-group budget with 80% and 100% notifications.
+
 ## Done when
 
 - The sync check passes, and `kit:check` passes at the repository's pinned release 1.2.1 (use kit's `check.py` from

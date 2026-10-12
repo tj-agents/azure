@@ -1,0 +1,5 @@
+variable "images" {
+  type        = map(string)
+  default     = {}
+  description = "Container image per workload id (plus `migration`), set from the build step."
+}

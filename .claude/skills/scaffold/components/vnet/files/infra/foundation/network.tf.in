@@ -29,3 +29,39 @@ resource "azurerm_subnet" "private_endpoints" {
   virtual_network_name = azurerm_virtual_network.main.name
   address_prefixes     = ["10.0.2.0/24"]
 }
+
+@if app_service
+resource "azurerm_subnet" "app" {
+  name                 = "app"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.4.0/24"]
+
+  delegation {
+    name = "app-service"
+
+    service_delegation {
+      name    = "Microsoft.Web/serverFarms"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+@endif
+
+@if flex_consumption
+resource "azurerm_subnet" "functions" {
+  name                 = "functions"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.3.0/24"]
+
+  delegation {
+    name = "functions"
+
+    service_delegation {
+      name    = "Microsoft.App/environments"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/join/action"]
+    }
+  }
+}
+@endif

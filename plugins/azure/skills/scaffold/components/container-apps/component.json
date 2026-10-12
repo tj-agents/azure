@@ -1,5 +1,5 @@
 {
   "order": 20,
-  "when": "host=container-apps",
-  "description": "Container registry, Container Apps environment and the workload's Container App."
+  "when": "container_apps_used",
+  "description": "Container registry, Container Apps environment, and a Container App per workload hosted there."
 }
