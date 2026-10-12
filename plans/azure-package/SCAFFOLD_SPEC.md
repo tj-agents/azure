@@ -84,7 +84,7 @@ the `private_networking` variable only when vnet is selected, and otherwise hard
 - `backend.tf`: `backend "azurerm" { use_azuread_auth = true }`.
 - `variables.tf`:
   - `env` (validation `^[a-z]{2,5}$`) and `region` (validation in `uks`, `ukw`, `weu`, `neu`);
-  - in instance only: `ephemeral_id` (default `""`, validation `^$|^[a-z0-9]{1,8}$`);
+  - in instance only: `ephemeral_id` (default `""`, validation `^$|^[a-z0-9]{1,6}$`);
   - per component: `private_networking` (bool, default true, only when vnet); in foundation, the GitHub OIDC
     inputs `github_owner`, `github_owner_id`, `github_repository` and `github_repository_id`.
 - `locals.tf`:

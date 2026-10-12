@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+import unittest.mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / ".agents/azure/utility/scaffold/scripts/scaffold.py"
@@ -161,6 +162,26 @@ class GenerationTests(unittest.TestCase):
             self.assertIn("versions.tf", err)
             self.assertEqual(["infra"], [path.name for path in root.iterdir()])
             self.assertEqual("existing\n", (root / "infra/foundation/versions.tf").read_text(encoding="utf-8"))
+
+    def test_a_failed_write_removes_everything_it_wrote(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "infra").mkdir()
+            original = Path.write_bytes
+            calls = {"count": 0}
+
+            def failing_write(path: Path, data: bytes) -> int:
+                calls["count"] += 1
+                if calls["count"] == 5:
+                    raise OSError("disk full")
+                return original(path, data)
+
+            with unittest.mock.patch.object(Path, "write_bytes", failing_write):
+                code, _, err = run(["new", "--into", str(root), "--set", "name=demo"])
+            self.assertEqual(1, code)
+            self.assertIn("disk full", err)
+            self.assertEqual(["infra"], [path.name for path in root.iterdir()])
+            self.assertEqual([], list((root / "infra").iterdir()))
 
     def test_name_refuses_when_the_project_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

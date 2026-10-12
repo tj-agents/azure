@@ -48,6 +48,10 @@ gh api repos/<owner>/<repo> --jq '.owner.id, .id'
 
 The first line is `github_owner_id`, the second is `github_repository_id`.
 
+The federated credentials expect GitHub's immutable OIDC subject, `repo:<owner>@<owner-id>/<repo>@<repo-id>:...`,
+which repositories created after 2026-07-15 send by default. Opt an older repository into immutable subjects
+in its Actions OIDC settings before the first plan, or no login will match.
+
 Service Bus subscriptions keep their `$Default` rule in this version; remove it by hand if a subscription
 must receive only its `handled-types` messages.
 
