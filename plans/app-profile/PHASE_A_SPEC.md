@@ -97,7 +97,7 @@ files.
 - `app-service` http:
   - the plan lives in foundation;
   - a Linux web app has `application_stack` from `runtime`: `dotnet_version`, `node_version`,
-    `python_version`, or `java_version` with `java_server = "JAVA_SE"`;
+    `python_version`, or `java_version` with `java_server = "JAVA"` and `java_server_version` (azurerm 5);
   - it uses a user-assigned identity, the health check path from `probes.readiness`, and a `staging` slot.
 - `flex-consumption` functions:
   - an `azurerm_function_app_flex_consumption`;
