@@ -24,7 +24,7 @@ variable "ephemeral_id" {
   description = "Optional suffix for a throwaway instance."
 
   validation {
-    condition     = can(regex("^$|^[a-z0-9]{1,8}$", var.ephemeral_id))
-    error_message = "ephemeral_id must be empty or up to 8 lowercase alphanumeric characters."
+    condition     = can(regex("^$|^[a-z0-9]{1,6}$", var.ephemeral_id))
+    error_message = "ephemeral_id must be empty or up to 6 lowercase alphanumeric characters."
   }
 }

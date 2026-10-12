@@ -62,6 +62,10 @@ Done when:
   build, deployment and security, plus the direction goal and skill tree. `kit:check` and the skill
   references pass.
 - 2026-10-12: scaffold implementation dispatched at lane L4 against [SCAFFOLD_SPEC.md](SCAFFOLD_SPEC.md).
+- 2026-10-12: commit `57ad433` adds scaffold v1. The full suite with the Terraform gate passed once, and a
+  rerun after the template fixes was stopped by host memory pressure, so the gate now runs in CI. PR
+  https://github.com/tj-agents/azure/pull/1 is open; review lens and CI pending. The marketplace catalog
+  commit is ready on `Feature/AzurePlugin` in the marketplace repository.
 
 ## Next Steps
 

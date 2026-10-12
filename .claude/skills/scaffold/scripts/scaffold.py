@@ -331,11 +331,29 @@ def plan(spec: dict, preset: str | None, config_path: Path | None, sets: list[st
 
 
 def write_project(project: Path, files: dict[str, str], metadata: dict) -> None:
-    for relative, content in files.items():
-        path = project / relative
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(content.encode("utf-8"))
-    (project / ".scaffold.azure.json").write_bytes((json.dumps(metadata, indent=2) + "\n").encode("utf-8"))
+    outputs = dict(files)
+    outputs[".scaffold.azure.json"] = json.dumps(metadata, indent=2) + "\n"
+    created_dirs: list[Path] = []
+    written: list[Path] = []
+    path = project
+    try:
+        for relative, content in outputs.items():
+            path = project / relative
+            for directory in reversed(path.parents):
+                if not directory.exists():
+                    directory.mkdir()
+                    created_dirs.append(directory)
+            path.write_bytes(content.encode("utf-8"))
+            written.append(path)
+    except OSError as error:
+        for done in reversed(written):
+            done.unlink(missing_ok=True)
+        for directory in reversed(created_dirs):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        raise ScaffoldError(f"could not write {path} ({error}); removed everything this run wrote") from error
 
 
 def cmd_new(args: argparse.Namespace) -> int:
@@ -381,7 +399,11 @@ def cmd_new(args: argparse.Namespace) -> int:
         print((project / ".scaffold.azure.json"))
         return 0
 
-    write_project(project, files, metadata)
+    try:
+        write_project(project, files, metadata)
+    except ScaffoldError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     print(f"created {project}")
     return 0
 
