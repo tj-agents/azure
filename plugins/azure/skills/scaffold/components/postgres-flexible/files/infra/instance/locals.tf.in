@@ -1,0 +1,9 @@
+locals {
+  database_name = replace(local.instance_prefix, "-", "_")
+
+  database_env = {
+    DATABASE_HOST = data.azurerm_postgresql_flexible_server.main.fqdn
+    DATABASE_NAME = local.database_name
+    DATABASE_USER = azurerm_user_assigned_identity.workload.name
+  }
+}

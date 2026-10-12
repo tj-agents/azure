@@ -1,0 +1,59 @@
+resource "azurerm_linux_web_app" "main" {
+  name                = "${local.instance_prefix}-app"
+  resource_group_name = data.azurerm_resource_group.main.name
+  location            = data.azurerm_resource_group.main.location
+  service_plan_id     = data.azurerm_service_plan.main.id
+
+  https_only = true
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.workload.id]
+  }
+
+  site_config {
+    always_on                         = true
+    health_check_path                 = "/health"
+    health_check_eviction_time_in_min = 5
+  }
+
+  app_settings = merge(
+    {
+      AZURE_CLIENT_ID                       = azurerm_user_assigned_identity.workload.client_id
+      APPLICATIONINSIGHTS_CONNECTION_STRING = data.azurerm_application_insights.main.connection_string
+      OTEL_SERVICE_NAME                     = "__NAME__"
+    },
+    local.database_env
+  )
+
+  tags = local.tags
+}
+
+resource "azurerm_linux_web_app_slot" "staging" {
+  name           = "staging"
+  app_service_id = azurerm_linux_web_app.main.id
+
+  https_only = true
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.workload.id]
+  }
+
+  site_config {
+    always_on                         = true
+    health_check_path                 = "/health"
+    health_check_eviction_time_in_min = 5
+  }
+
+  app_settings = merge(
+    {
+      AZURE_CLIENT_ID                       = azurerm_user_assigned_identity.workload.client_id
+      APPLICATIONINSIGHTS_CONNECTION_STRING = data.azurerm_application_insights.main.connection_string
+      OTEL_SERVICE_NAME                     = "__NAME__"
+    },
+    local.database_env
+  )
+
+  tags = local.tags
+}

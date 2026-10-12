@@ -1,0 +1,9 @@
+data "azurerm_container_app_environment" "main" {
+  name                = "${local.prefix}-cae"
+  resource_group_name = data.azurerm_resource_group.main.name
+}
+
+data "azurerm_container_registry" "main" {
+  name                = substr("${replace(local.prefix, "-", "")}cr", 0, 24)
+  resource_group_name = data.azurerm_resource_group.main.name
+}

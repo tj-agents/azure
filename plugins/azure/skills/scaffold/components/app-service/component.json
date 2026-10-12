@@ -1,0 +1,5 @@
+{
+  "order": 21,
+  "when": "host=app-service",
+  "description": "Linux App Service plan, web app and staging slot."
+}

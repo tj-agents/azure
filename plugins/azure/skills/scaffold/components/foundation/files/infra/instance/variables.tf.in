@@ -1,0 +1,30 @@
+variable "env" {
+  type        = string
+  description = "Short environment code."
+
+  validation {
+    condition     = can(regex("^[a-z]{2,5}$", var.env))
+    error_message = "env must be 2-5 lowercase letters."
+  }
+}
+
+variable "region" {
+  type        = string
+  description = "Short region code."
+
+  validation {
+    condition     = contains(["uks", "ukw", "weu", "neu"], var.region)
+    error_message = "region must be one of uks, ukw, weu, neu."
+  }
+}
+
+variable "ephemeral_id" {
+  type        = string
+  default     = ""
+  description = "Optional suffix for a throwaway instance."
+
+  validation {
+    condition     = can(regex("^$|^[a-z0-9]{1,8}$", var.ephemeral_id))
+    error_message = "ephemeral_id must be empty or up to 8 lowercase alphanumeric characters."
+  }
+}

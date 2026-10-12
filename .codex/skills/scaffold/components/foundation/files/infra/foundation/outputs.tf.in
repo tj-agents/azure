@@ -1,0 +1,16 @@
+output "resource_group_name" {
+  value = azurerm_resource_group.main.name
+}
+
+output "state_storage_account_name" {
+  value = azurerm_storage_account.state.name
+}
+
+output "deploy_identity_client_id" {
+  value = azurerm_user_assigned_identity.deploy.client_id
+}
+
+output "application_insights_connection_string" {
+  value     = azurerm_application_insights.main.connection_string
+  sensitive = true
+}

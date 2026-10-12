@@ -57,11 +57,14 @@ Done when:
 ## Progress
 
 - 2026-10-12: repository generated from kit 1.2.1; sync check and `kit:check` pass.
+- 2026-10-12: the repository is public and main CI is green on Windows, Ubuntu and hosts.
+- 2026-10-12: on `Feature/BasicStandards`, commit `7f7bb1b` records the approved rules in structure, style,
+  build, deployment and security, plus the direction goal and skill tree. `kit:check` and the skill
+  references pass.
+- 2026-10-12: scaffold implementation dispatched at lane L4 against [SCAFFOLD_SPEC.md](SCAFFOLD_SPEC.md).
 
 ## Next Steps
 
-1. Survey the reference estates and put the proposed contract rules, the scaffold option schema and presets,
-   and a microservice-communication packaging recommendation to Tommy in one batched question.
-2. On a feature branch, write the contracts, direction and scaffold, with tests and a toolchain gate. Then
-   review, open the PR and merge.
-3. Open the marketplace catalog PR.
+1. Reconcile the scaffold result, then review, commit, open the PR, get CI green (including
+   `terraform.yml`) and merge.
+2. Open the marketplace catalog PR.

@@ -1,0 +1,10 @@
+data "azurerm_servicebus_namespace" "main" {
+  name                = "${local.prefix}-sbns"
+  resource_group_name = data.azurerm_resource_group.main.name
+}
+
+data "azurerm_servicebus_topic" "topic" {
+  for_each     = toset(local.topics)
+  name         = each.value
+  namespace_id = data.azurerm_servicebus_namespace.main.id
+}
