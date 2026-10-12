@@ -1,42 +1,36 @@
 {
-  "version": "1.0.0",
+  "version": "2.0.0",
   "options": {
-    "name": {
-      "type": "string",
-      "required": true,
-      "pattern": "^[a-z][a-z0-9]{1,11}$",
-      "description": "Workload name, lowercase, 2-12 characters."
-    },
-    "host": {
+    "http_host": {
       "type": "enum",
-      "values": ["none", "container-apps", "app-service"],
-      "default": "none",
-      "description": "Compute host for the workload."
+      "values": ["container-apps", "app-service"],
+      "default": "container-apps",
+      "description": "Compute host for an `http` workload."
     },
-    "database": {
+    "background_host": {
       "type": "enum",
-      "values": ["none", "postgres-flexible"],
-      "default": "none",
-      "description": "Database for the workload."
+      "values": ["container-apps"],
+      "default": "container-apps",
+      "description": "Compute host for a `background` workload."
+    },
+    "functions_host": {
+      "type": "enum",
+      "values": ["flex-consumption", "container-apps"],
+      "default": "flex-consumption",
+      "description": "Compute host for a `functions` workload."
     },
     "messaging": {
       "type": "enum",
       "values": ["none", "service-bus"],
       "default": "none",
-      "description": "Messaging for the workload."
+      "description": "Messaging for this instance."
     },
     "topics": {
       "type": "list",
       "default": [],
       "pattern": "^[a-z][a-z0-9-]{0,49}$",
       "requires": { "messaging": "service-bus" },
-      "description": "Topic names this workload's foundation creates."
-    },
-    "subscriptions": {
-      "type": "list",
-      "default": [],
-      "requires": { "messaging": "service-bus" },
-      "description": "Topics this workload consumes; each must also be listed in `topics`."
+      "description": "Topic names this instance's foundation creates; a workload publishes and consumes them through the profile's `messaging` field."
     },
     "key_vault": {
       "type": "bool",
