@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -274,6 +275,55 @@ class ProfileValidationTests(unittest.TestCase):
         }
         self.check(profile, "build.package")
 
+    def test_build_image_rejects_github_actions_expression_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {"id": "worker", "kind": "background", "build": {"image": "echo ${{ secrets.FOO }}"}}
+            ],
+        }
+        self.check(profile, "must not contain")
+
+    def test_build_package_rejects_closing_braces_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "fn",
+                    "kind": "functions",
+                    "runtime": {"name": "dotnet-isolated", "version": "10.0"},
+                    "build": {"package": "echo }} nope"},
+                }
+            ],
+        }
+        self.check(profile, "must not contain")
+
+    def test_migration_build_image_rejects_github_actions_expression_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "database": {
+                "engine": "postgres",
+                "migration": {"build": {"image": "echo ${{ github.token }}"}, "command": ["x"]},
+            },
+        }
+        self.check(profile, "must not contain")
+
+    def test_migration_command_rejects_github_actions_expression_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "database": {
+                "engine": "postgres",
+                "migration": {"build": {"image": "x"}, "command": ["echo", "${{ secrets.FOO }}"]},
+            },
+        }
+        self.check(profile, "must not contain")
+
     def test_both_build_image_and_package_is_not_an_error(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = new_project(temporary)
@@ -524,6 +574,33 @@ class TokenResolutionTests(unittest.TestCase):
             migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
             self.assertIn("azurerm_user_assigned_identity.migrator.client_id", migration_tf)
             self.assertNotIn("ONLY_WORKLOAD", migration_tf)
+
+    def test_migration_script_interpolates_real_identity_and_database_names(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [{"id": "api", "kind": "background", "build": {"image": "x"}}],
+                "database": {
+                    "engine": "postgres",
+                    "migration": {"build": {"image": "x"}, "command": ["x"]},
+                },
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
+
+            self.assertIn('${azurerm_user_assigned_identity.workload["api"].name}', migration_tf)
+            self.assertIn("${azurerm_user_assigned_identity.migrator.name}", migration_tf)
+            self.assertIn("${local.database_name}", migration_tf)
+
+            self.assertNotIn("current_database()", migration_tf)
+            self.assertNotIn("'demo-api-id'", migration_tf)
+            self.assertNotIn('"demo-api-id"', migration_tf)
+            self.assertNotIn("'demo-migrator-id'", migration_tf)
+            self.assertNotIn('"demo-migrator-id"', migration_tf)
 
 
 class InteractiveModeTests(unittest.TestCase):
@@ -788,6 +865,36 @@ class KeyVaultOperatorAccessTests(unittest.TestCase):
             key_vault_tf = (root / "infra/foundation/key-vault.tf").read_text(encoding="utf-8")
             self.assertIn('role_definition_name = "Key Vault Secrets Officer"', key_vault_tf)
             self.assertIn("data.azurerm_client_config.current.object_id", key_vault_tf)
+
+    def test_only_workloads_that_reference_keyvault_uri_get_secrets_user(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [
+                    {
+                        "id": "api",
+                        "kind": "background",
+                        "build": {"image": "x"},
+                        "settings": {"KV_URI": "{keyvault.uri}"},
+                    },
+                    {"id": "worker", "kind": "background", "build": {"image": "x"}},
+                ],
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--set", "key_vault=true", "--no-input"])
+            self.assertEqual(0, code, err)
+            workloads_tf = (root / "infra/instance/workloads.tf").read_text(encoding="utf-8")
+            self.assertRegex(
+                workloads_tf, re.compile(r"api = \{.*?uses_key_vault\s*=\s*true", re.DOTALL)
+            )
+            self.assertRegex(
+                workloads_tf, re.compile(r"worker = \{.*?uses_key_vault\s*=\s*false", re.DOTALL)
+            )
+            self.assertIn("key_vault_workloads", workloads_tf)
+            key_vault_tf = (root / "infra/instance/key-vault.tf").read_text(encoding="utf-8")
+            self.assertIn("for_each = local.key_vault_workloads", key_vault_tf)
 
 
 class BudgetTests(unittest.TestCase):

@@ -78,6 +78,9 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
   - `build.image` is required when the workload's host is Container Apps; `build.package` is required on
     App Service or Flex Consumption. A workload may carry both; azure uses the one its host needs and
     ignores the other. A command may reference `$IMAGE`, `$TAG`, `$PACKAGE`, `$REGISTRY` and `$REPOSITORY`.
+    No `build.*` command, nor a `database.migration.command` entry, may contain `${{` or `}}`; azure passes
+    each command to the workflow through a step `env:` value and runs it with `bash -c`, never splicing it
+    into the YAML, but rejects the GitHub Actions expression syntax outright regardless.
   - `settings`: optional, same shape and validation as the top-level `settings` below, merged over it for
     that workload — the workload's value wins on a key clash.
   - `messaging`: optional, `{"publishes": [topic...], "consumes": [topic...]}`. Every topic named must be in
@@ -95,7 +98,8 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
   - `postgres.host`, `postgres.database`, `postgres.user` (requires `database`; `postgres.user` resolves
     to the consuming workload's own identity, or the migrator's inside the migration job);
   - `servicebus.namespace` (requires `messaging=service-bus`);
-  - `keyvault.uri` (requires `key_vault`);
+  - `keyvault.uri` (requires `key_vault`; only a workload whose effective settings — top-level merged with
+    its own — reference this token gets `Key Vault Secrets User`, at the vault's scope);
   - `monitor.connection_string`;
   - `identity.client_id` (the consuming workload's own identity).
   - An unknown token, or a token used without its required option, exits 2.
