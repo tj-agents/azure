@@ -1,7 +1,11 @@
+@only-if workflows
 # __NAME__ infrastructure
 
 Two Terraform roots: `foundation` (slow, shared resources) and `instance` (per-deployment resources). See
-`azure:structure` for why they're split.
+`azure:structure` for why they're split. Both are driven by the app profile at `infra/app.json`, written by
+the app stack; `azure:scaffold` turns it into the workload, host and database resources it asks for. Run
+`python -B <scaffold-skill-dir>/scripts/scaffold.py options --schema` to see azure's own, app-agnostic
+options as JSON.
 
 ## Bootstrap
 
@@ -35,7 +39,8 @@ terraform init -migrate-state \
 The workflow in `.github/workflows/infra.yml` reads these GitHub Actions variables, set once the foundation
 has deployed:
 
-- `AZURE_FOUNDATION_READY` — `"true"` once the state account above exists; gates the `plan` and `apply` jobs.
+- `AZURE_FOUNDATION_READY` — `"true"` once the state account above exists; gates the `plan` and `deploy`
+  jobs.
 - `AZURE_CLIENT_ID` — the deploy identity's client id (`terraform output -raw deploy_identity_client_id`).
 - `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` — the target tenant and subscription.
 - `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT` — the values used in the migration above.
@@ -54,6 +59,17 @@ in its Actions OIDC settings before the first plan, or no login will match.
 
 Service Bus subscriptions keep their `$Default` rule in this version; remove it by hand if a subscription
 must receive only its `handled-types` messages.
+
+## The deploy job
+
+On push to `main`, `deploy` applies foundation, then for every workload in the profile runs its
+`build.image` or `build.package` command — whichever its host needs — with `REGISTRY` (the registry login
+server), `REPOSITORY` (`<name>-<id>`), `TAG` (the commit sha) and, for an image build,
+`IMAGE=$REGISTRY/$REPOSITORY:$TAG` set in its environment. The database's `migration.build.image`, if any,
+builds the same way under key `migration`. It then applies the migration job and its identity, admin and
+database, runs the job and waits for it to succeed, applies the full instance plan with the built images,
+deploys each package (Flex Consumption via `az functionapp deploy`; App Service via a staging-slot deploy,
+a readiness wait, then a slot swap), and waits for each Container App's revision to become ready.
 
 ## Offline gate
 
