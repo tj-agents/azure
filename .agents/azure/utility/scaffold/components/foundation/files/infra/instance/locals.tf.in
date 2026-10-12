@@ -21,9 +21,3 @@ locals {
     var.ephemeral_id != "" ? { ephemeral_id = var.ephemeral_id } : {}
   )
 }
-
-@if !postgres_flexible
-locals {
-  database_env = {}
-}
-@endif

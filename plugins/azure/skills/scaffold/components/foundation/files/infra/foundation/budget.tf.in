@@ -1,0 +1,27 @@
+resource "azurerm_consumption_budget_resource_group" "main" {
+  name              = "${local.prefix}-budget"
+  resource_group_id = azurerm_resource_group.main.id
+
+  amount     = var.budget_amount
+  time_grain = "Monthly"
+
+  time_period {
+    start_date = var.budget_start_date
+  }
+
+  notification {
+    enabled        = true
+    threshold      = 80
+    operator       = "GreaterThanOrEqualTo"
+    contact_roles  = ["Owner"]
+    contact_emails = var.budget_alert_emails
+  }
+
+  notification {
+    enabled        = true
+    threshold      = 100
+    operator       = "GreaterThanOrEqualTo"
+    contact_roles  = ["Owner"]
+    contact_emails = var.budget_alert_emails
+  }
+}

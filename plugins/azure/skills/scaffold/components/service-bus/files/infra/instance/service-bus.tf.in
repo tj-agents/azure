@@ -1,8 +1,22 @@
-resource "azurerm_servicebus_subscription" "main" {
-  for_each = toset(local.subscriptions)
+locals {
+  publish_entries = merge([
+    for id, workload in local.workloads : {
+      for topic in workload.publishes : "${id}-${topic}" => { id = id, topic = topic }
+    }
+  ]...)
 
-  name     = "__NAME__-${each.value}"
-  topic_id = data.azurerm_servicebus_topic.topic[each.value].id
+  consume_entries = merge([
+    for id, workload in local.workloads : {
+      for topic in workload.consumes : "${id}-${topic}" => { id = id, topic = topic }
+    }
+  ]...)
+}
+
+resource "azurerm_servicebus_subscription" "main" {
+  for_each = local.consume_entries
+
+  name     = "${each.value.id}-${each.value.topic}"
+  topic_id = data.azurerm_servicebus_topic.topic[each.value.topic].id
 
   max_delivery_count                        = 10
   lock_duration                             = "PT1M"
@@ -11,26 +25,30 @@ resource "azurerm_servicebus_subscription" "main" {
 }
 
 resource "azurerm_servicebus_subscription_rule" "handled_types" {
-  for_each = toset(local.subscriptions)
+  for_each = local.consume_entries
 
   name            = "handled-types"
-  subscription_id = azurerm_servicebus_subscription.main[each.value].id
+  subscription_id = azurerm_servicebus_subscription.main[each.key].id
   filter_type     = "SqlFilter"
   sql_filter      = join(" OR ", [for type in var.service_bus_handled_types : "type = '${type}'"])
 }
 
 resource "azurerm_role_assignment" "service_bus_receiver" {
-  for_each = toset(local.subscriptions)
+  for_each = local.consume_entries
 
-  scope                = azurerm_servicebus_subscription.main[each.value].id
+  scope                = azurerm_servicebus_subscription.main[each.key].id
   role_definition_name = "Azure Service Bus Data Receiver"
-  principal_id         = azurerm_user_assigned_identity.workload.principal_id
+  principal_id         = azurerm_user_assigned_identity.workload[each.value.id].principal_id
+
+  depends_on = [time_sleep.workload_identity_propagation]
 }
 
 resource "azurerm_role_assignment" "service_bus_sender" {
-  for_each = toset(local.topics)
+  for_each = local.publish_entries
 
-  scope                = data.azurerm_servicebus_topic.topic[each.value].id
+  scope                = data.azurerm_servicebus_topic.topic[each.value.topic].id
   role_definition_name = "Azure Service Bus Data Sender"
-  principal_id         = azurerm_user_assigned_identity.workload.principal_id
+  principal_id         = azurerm_user_assigned_identity.workload[each.value.id].principal_id
+
+  depends_on = [time_sleep.workload_identity_propagation]
 }

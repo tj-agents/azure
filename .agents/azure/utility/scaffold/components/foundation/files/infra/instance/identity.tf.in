@@ -1,7 +1,0 @@
-resource "azurerm_user_assigned_identity" "workload" {
-  name                = "${local.instance_prefix}-id"
-  resource_group_name = data.azurerm_resource_group.main.name
-  location            = data.azurerm_resource_group.main.location
-
-  tags = local.tags
-}

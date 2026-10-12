@@ -1,0 +1,49 @@
+resource "azurerm_function_app_flex_consumption" "main" {
+  for_each = local.flex_consumption_workloads
+
+  name                = "${local.instance_prefix}-${each.key}-func"
+  resource_group_name = data.azurerm_resource_group.main.name
+  location            = data.azurerm_resource_group.main.location
+  service_plan_id     = data.azurerm_service_plan.flex_consumption.id
+
+  storage_container_type            = "blobContainer"
+  storage_container_endpoint        = "${azurerm_storage_account.function[each.key].primary_blob_endpoint}${azurerm_storage_container.function[each.key].name}"
+  storage_authentication_type       = "UserAssignedIdentity"
+  storage_user_assigned_identity_id = azurerm_user_assigned_identity.workload[each.key].id
+
+  runtime_name    = each.value.runtime_name
+  runtime_version = each.value.runtime_version
+
+@if vnet
+  virtual_network_subnet_id = data.azurerm_subnet.functions.id
+@endif
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.workload[each.key].id]
+  }
+
+  app_settings = merge(
+    local.settings[each.key],
+    {
+      AzureWebJobsStorage__accountName = azurerm_storage_account.function[each.key].name
+      AzureWebJobsStorage__credential  = "managedidentity"
+      AzureWebJobsStorage__clientId    = azurerm_user_assigned_identity.workload[each.key].client_id
+    }
+  )
+
+  site_config {
+    application_insights_connection_string = data.azurerm_application_insights.main.connection_string
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length("${local.instance_prefix}-${each.key}-func") <= 60
+      error_message = "Function App name must be 60 characters or fewer."
+    }
+  }
+
+  depends_on = [time_sleep.function_storage_role_propagation]
+}

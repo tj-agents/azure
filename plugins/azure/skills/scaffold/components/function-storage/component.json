@@ -1,0 +1,5 @@
+{
+  "order": 24,
+  "when": "always",
+  "description": "One storage account per `functions` workload, identity-based, shared by both function hosts."
+}

@@ -2,3 +2,11 @@ data "azurerm_service_plan" "main" {
   name                = "${local.prefix}-asp"
   resource_group_name = data.azurerm_resource_group.main.name
 }
+
+@if vnet
+data "azurerm_subnet" "app" {
+  name                 = "app"
+  resource_group_name  = data.azurerm_resource_group.main.name
+  virtual_network_name = data.azurerm_virtual_network.main.name
+}
+@endif

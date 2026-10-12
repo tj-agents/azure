@@ -1,0 +1,17 @@
+resource "azurerm_user_assigned_identity" "workload" {
+  for_each = local.workloads
+
+  name                = "${local.instance_prefix}-${each.key}-id"
+  resource_group_name = data.azurerm_resource_group.main.name
+  location            = data.azurerm_resource_group.main.location
+
+  tags = local.tags
+}
+
+resource "time_sleep" "workload_identity_propagation" {
+  for_each = local.workloads
+
+  create_duration = "60s"
+
+  depends_on = [azurerm_user_assigned_identity.workload]
+}

@@ -1,0 +1,12 @@
+data "azurerm_service_plan" "flex_consumption" {
+  name                = "${local.prefix}-flexplan"
+  resource_group_name = data.azurerm_resource_group.main.name
+}
+
+@if vnet
+data "azurerm_subnet" "functions" {
+  name                 = "functions"
+  resource_group_name  = data.azurerm_resource_group.main.name
+  virtual_network_name = data.azurerm_virtual_network.main.name
+}
+@endif

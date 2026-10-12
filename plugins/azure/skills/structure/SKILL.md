@@ -41,32 +41,40 @@ Owns the repository and module layout, visibility, and where dependencies are wi
 
 ## File structure
 
-`azure:scaffold` writes this into a new or existing repository. Each `<area>.tf` file exists only when its
-component is selected.
+`azure:scaffold` writes this into a new or existing repository, driven by the app profile at
+`infra/app.json`. Each `<area>.tf` file exists only when its component is selected; `workloads.tf`,
+`identity.tf`, `function-storage.tf` and the `images` variable are always present, with their maps empty
+when the profile has no workloads.
 
 ```text
 <repo>/
   .scaffold.azure.json
   .github/workflows/infra.yml
   infra/
+    app.json             the app profile
     README.md
     env/dev.tfvars
     foundation/
       versions.tf  providers.tf  backend.tf  variables.tf  locals.tf  outputs.tf
-      main.tf             resource group, state storage, Log Analytics, deployment identity
-      network.tf          vnet
-      container-apps.tf   environment and registry
-      app-service.tf      plan
-      postgres.tf         server
+      main.tf               resource group, state storage, Log Analytics, deployment identity
+      network.tf            vnet
+      container-apps.tf     environment and registry
+      app-service.tf        plan
+      flex-consumption.tf   Flex Consumption plan
+      postgres.tf           server
       key-vault.tf
-      service-bus.tf      namespace and topics
+      service-bus.tf        namespace and topics
     instance/
       versions.tf  providers.tf  backend.tf  variables.tf  locals.tf  outputs.tf
-      data.tf             foundation lookups
-      identity.tf         workload identity
-      container-apps.tf   app
-      app-service.tf      web app and staging slot
-      postgres.tf         database and migrator identity
-      key-vault.tf        role assignment
-      service-bus.tf      subscriptions, rules and role assignments
+      data.tf                 foundation lookups
+      workloads.tf            locals.workloads and locals.settings, rendered from the profile
+      identity.tf             one identity per workload
+      function-storage.tf     one storage account per `functions` workload
+      container-apps.tf       a Container App per workload hosted there
+      app-service.tf          a web app and staging slot per `http` workload hosted there
+      flex-consumption.tf     a Function App per `functions` workload hosted there
+      postgres.tf             database and migrator identity
+      migration.tf            the migration Container Apps Job, when the profile has one
+      key-vault.tf            role assignment
+      service-bus.tf          subscriptions, rules and role assignments
 ```
