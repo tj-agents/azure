@@ -1,0 +1,180 @@
+{
+  "plugin": "azure",
+  "dependencies": [],
+  "profiles": {
+    "core": [
+      "build",
+      "domain-design",
+      "errors",
+      "libraries",
+      "structure",
+      "style",
+      "testing"
+    ],
+    "knowledge": [
+      "direction",
+      "knowledge",
+      "learning"
+    ],
+    "scaffold": [
+      "scaffold"
+    ]
+  },
+  "compatibilitySkillAliases": {},
+  "skills": [
+    {
+      "name": "build",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "direction",
+      "kind": "knowledge",
+      "profile": "knowledge",
+      "applicability": [
+        "Azure learning"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "domain-design",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "errors",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "knowledge",
+      "kind": "knowledge",
+      "profile": "knowledge",
+      "applicability": [
+        "Azure learning"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "learning",
+      "kind": "knowledge",
+      "profile": "knowledge",
+      "applicability": [
+        "Azure projects and learning"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "libraries",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "scaffold",
+      "kind": "utility",
+      "profile": "scaffold",
+      "applicability": [
+        "new Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "structure",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "style",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "testing",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    }
+  ]
+}
