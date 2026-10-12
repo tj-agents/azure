@@ -47,6 +47,12 @@ Done when:
 - 2026-10-12: Azure is surveyed through a read-only Azure MCP server for reconnaissance only. Practice and
   scaffold targets are the personal account.
 - 2026-10-12: `new --into` is required (shared contract § Composing scaffolds in one repository).
+- 2026-10-12, Tommy: approved all 27 rules in [PROPOSAL.md](PROPOSAL.md), including the new contracts
+  `azure:deployment` and `azure:security`, Entra-only Postgres and plan-then-apply CI.
+- 2026-10-12, Tommy: approved scaffold v1 as proposed, with presets `foundation` and `web-api`.
+- 2026-10-12, Tommy: microservice-communication standards belong in a future `dotnet:microservice-messaging`
+  contract. This package owns only the Service Bus resources, and nothing is created for it here.
+- 2026-10-12, Tommy: the repository is public so CI runs free, like its siblings.
 
 ## Progress
 
