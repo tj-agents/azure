@@ -160,7 +160,8 @@ The shared scaffold contract's `--into` section is on hold for the same reason (
   - Phase B is committed locally as `22bc9e6` on `Feature/AzureHosting`; its PR follows Phase A's merge.
   - sandbox-dotnet (`tomjseery/sandbox-dotnet`, owner session `repos-4c`) exists, seeded from azure v1. Its
     `infra/SCAFFOLD_GAPS.md` items 5, 7 and 8 were added to Phase A as addition 5.
-  - Notify `repos-4c` when each PR merges.
+  - Notify the sandbox-dotnet session (`sandbox-dotnet-17` after the reopen; formerly `repos-4c`) when each
+    PR merges.
 - 2026-10-13: **pending side workstream (standards defect).** core `continuation_stop.py` evaluates the
   delivery binding in the session's launch directory and never checks which session owns it.
   - Crash recovery started this session in Codex's `core/.worktrees/Fix-ContinuationStopBindingHead`
@@ -181,6 +182,25 @@ The shared scaffold contract's `--into` section is on hold for the same reason (
     messaging gate case uses the per-workload fields.
   - Verified: sync `-Check`, `kit:check` 1.2.1, and 55 tests (50 plus 5 Terraform gate cases, all green
     locally against Terraform 1.15.8 and azurerm 5.x).
+  - Phase A was committed and pushed as `8c16c93`, as https://github.com/tj-agents/azure/pull/3. CI `ci` and
+    `terraform` are green (runs 38321914419 and 38321914119). Independent review is in progress.
+  - Phase B was pushed at `22bc9e6`.
+  - Local end-to-end run of sandbox + cloud=azure through the real Phase A scaffold: the profile and infra
+    generate, but `dotnet build` fails with CS1061 (missing Azure Monitor `using`s in Api, Worker and
+    Functions). Sent back to the Phase B agent to fix, then run verify.py's azure configuration with the
+    Terraform validate.
+  - Phase B fix `3d550b7` was pushed. The sandbox + cloud=azure end-to-end run through the real Phase A
+    scaffold builds Release with 0 warnings and 0 errors, and Terraform fmt/init/validate pass on both
+    roots. `dotnet test` found no test methods, because the scaffold ships empty test projects, the same as
+    before.
+  - PR #3 review found real defects:
+    - critical: migration role names don't match the Terraform identity names;
+    - critical: `GRANT CONNECT` targets a literal string;
+    - high: possible `${{` workflow injection;
+    - high: the migration job has no length precondition;
+    - medium: Key Vault reader rights go to every workload.
+    All were sent to the Phase A agent to fix with tests; `java_server = "JAVA"` is kept and the spec
+    corrected.
 
 ## Next Steps
 
