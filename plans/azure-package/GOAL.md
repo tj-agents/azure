@@ -73,7 +73,10 @@ Done when:
   CI `ci` and `terraform` (the Terraform gate on Windows and Ubuntu, 19 tests) are green. Adopted the
   standing delivery authorization; auto-merge is enabled on the repository.
 
-## Next Steps
+- 2026-10-12: PR 1 merged as `e5626e3`, and main CI (`ci`, `terraform`) is green. The marketplace catalog
+  PR (tj-agents/marketplace#7) merged as `0eb4755`, so the plugin installs as `azure@tj-agents`.
 
-1. Merge PR 1 once this head is green.
-2. Open the marketplace catalog PR and merge it once green.
+## Status
+
+Complete. Further breadth (more components, `add <component>`, a migration Container App Job, `$Default`
+rule removal, `dotnet:microservice-messaging`) needs a new goal.
