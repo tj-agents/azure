@@ -1,0 +1,20 @@
+{
+  "name": "azure",
+  "version": "0.1.0",
+  "description": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
+  "author": {
+    "name": "Tommy Seery"
+  },
+  "repository": "https://github.com/tj-agents/azure",
+  "skills": "./skills/",
+  "keywords": ["azure", "terraform", "infrastructure"],
+  "interface": {
+    "displayName": "Azure",
+    "shortDescription": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
+    "longDescription": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
+    "developerName": "Tommy Seery",
+    "category": "development",
+    "capabilities": [],
+    "defaultPrompt": "Teach me the next Azure concept my current task needs."
+  }
+}

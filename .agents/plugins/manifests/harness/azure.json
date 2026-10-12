@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "plugin": "azure-agents/azure",
+  "source_roots": [".agents/azure"],
+  "requires": {
+    "marketplaces": [{"id": "azure-agents", "repository": "tj-agents/azure"}, {"id": "base-agents", "repository": "tj-agents/core"}],
+    "plugins": ["azure-agents/azure", "base-agents/base"],
+    "hooks": [],
+    "permissions": {"claude_allow": [], "codex_prefix_rules": []}
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "name": "azure-agents",
+  "description": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
+  "owner": {
+    "name": "Tommy Seery"
+  },
+  "plugins": [
+    {
+      "name": "azure",
+      "source": "./plugins/azure",
+      "description": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
+      "category": "development",
+      "keywords": [
+        "azure",
+        "terraform",
+        "infrastructure"
+      ]
+    }
+  ]
+}

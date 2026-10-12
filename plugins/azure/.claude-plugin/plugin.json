@@ -1,0 +1,11 @@
+{
+  "name": "azure",
+  "displayName": "Azure",
+  "description": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
+  "author": {
+    "name": "Tommy Seery"
+  },
+  "repository": "https://github.com/tj-agents/azure",
+  "skills": "./skills/",
+  "keywords": ["azure", "terraform", "infrastructure"]
+}
