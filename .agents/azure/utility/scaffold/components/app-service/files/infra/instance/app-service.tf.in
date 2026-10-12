@@ -38,6 +38,13 @@ resource "azurerm_linux_web_app" "main" {
   app_settings = local.settings[each.key]
 
   tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length("${local.instance_prefix}-${each.key}-app") <= 60
+      error_message = "Web App name must be 60 characters or fewer."
+    }
+  }
 }
 
 resource "azurerm_linux_web_app_slot" "staging" {

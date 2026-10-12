@@ -372,6 +372,10 @@ def _valid_runtime(runtime: object, allowed_names: set[str] | None) -> bool:
     return True
 
 
+def _has_actions_expression(text: str) -> bool:
+    return "${{" in text or "}}" in text
+
+
 def workload_host(kind: str, values: dict) -> str:
     return {
         "http": values.get("http_host"),
@@ -462,6 +466,10 @@ def validate_profile(profile: object, values: dict) -> list[str]:
                 errors.append(f"{prefix}.build.image: required for a Container Apps host")
             if needs_package and not isinstance(build.get("package"), str):
                 errors.append(f"{prefix}.build.package: required for this host")
+            for key in ("image", "package"):
+                value = build.get(key)
+                if isinstance(value, str) and _has_actions_expression(value):
+                    errors.append(f"{prefix}.build.{key}: must not contain '${{{{' or '}}}}'")
 
         workload_settings = workload.get("settings")
         if workload_settings is not None:
@@ -489,9 +497,17 @@ def validate_profile(profile: object, values: dict) -> list[str]:
                     build = migration.get("build")
                     if not isinstance(build, dict) or not isinstance(build.get("image"), str):
                         errors.append("profile.database.migration.build.image: required")
+                    elif _has_actions_expression(build["image"]):
+                        errors.append("profile.database.migration.build.image: must not contain '${{' or '}}'")
                     command = migration.get("command")
                     if not isinstance(command, list) or not all(isinstance(c, str) for c in command):
                         errors.append("profile.database.migration.command: must be a list of strings")
+                    else:
+                        for item in command:
+                            if _has_actions_expression(item):
+                                errors.append(
+                                    f"profile.database.migration.command: {item!r} must not contain '${{{{' or '}}}}'"
+                                )
 
     settings = profile.get("settings", {})
     if settings:
@@ -588,6 +604,16 @@ def render_workload_settings(profile: dict, workload: dict) -> dict[str, str]:
     return {key: render_hcl_value(template, workload["id"]) for key, template in merged.items()}
 
 
+def workload_uses_token(profile: dict, workload: dict, token: str) -> bool:
+    merged = dict(profile.get("settings") or {})
+    merged.update(workload.get("settings") or {})
+    for template in merged.values():
+        for kind, value in parse_template(template):
+            if kind == "token" and value == token:
+                return True
+    return False
+
+
 def render_migration_settings(profile: dict) -> dict[str, str]:
     settings = profile.get("settings") or {}
     return {key: render_hcl_value(template, "migrator") for key, template in settings.items()}
@@ -649,6 +675,7 @@ def render_workloads_tf(profile: dict, values: dict) -> str:
         messaging = workload.get("messaging") or {}
         publishes = messaging.get("publishes") or []
         consumes = messaging.get("consumes") or []
+        uses_key_vault = workload_uses_token(profile, workload, "keyvault.uri")
 
         pairs = [
             ("kind", hcl_string(kind)),
@@ -659,6 +686,7 @@ def render_workloads_tf(profile: dict, values: dict) -> str:
             ("runtime_version", hcl_string(runtime_version)),
             ("publishes", hcl_list(publishes)),
             ("consumes", hcl_list(consumes)),
+            ("uses_key_vault", "true" if uses_key_vault else "false"),
         ]
         lines.append(f"    {workload_id} = {{")
         lines.extend(aligned_lines(pairs, "      "))
@@ -680,6 +708,10 @@ def render_workloads_tf(profile: dict, values: dict) -> str:
     lines.append(
         '  functions_workloads        = { for id, workload in local.workloads : id => workload '
         'if workload.kind == "functions" }'
+    )
+    lines.append(
+        '  key_vault_workloads        = { for id, workload in local.workloads : id => workload '
+        "if workload.uses_key_vault }"
     )
     lines.append("")
     lines.append("  settings = {")
@@ -729,10 +761,12 @@ ALTER DEFAULT PRIVILEGES FOR ROLE "@@MIGRATOR@@" IN SCHEMA public GRANT USAGE, S
 
 def render_migration_script(profile: dict) -> str:
     workloads = [w for w in profile.get("workloads") or [] if isinstance(w, dict) and isinstance(w.get("id"), str)]
+    migrator_name = "${" + identity_reference("migrator", "name") + "}"
+    database_name = "${local.database_name}"
     grants = "\n".join(
-        MIGRATION_GRANT_TEMPLATE.replace("@@IDENTITY@@", f"{profile['name']}-{w['id']}-id")
-        .replace("@@DATABASE@@", "' || current_database() || '")
-        .replace("@@MIGRATOR@@", f"{profile['name']}-migrator-id")
+        MIGRATION_GRANT_TEMPLATE.replace("@@IDENTITY@@", "${" + identity_reference(w["id"], "name") + "}")
+        .replace("@@DATABASE@@", database_name)
+        .replace("@@MIGRATOR@@", migrator_name)
         for w in workloads
     )
     return MIGRATION_SCRIPT_HEADER.replace("@@GRANTS@@", grants)
@@ -831,6 +865,13 @@ def render_migration_tf(profile: dict) -> str:
             "  }",
             "",
             "  tags = local.tags",
+            "",
+            "  lifecycle {",
+            "    precondition {",
+            '      condition     = length("${local.instance_prefix}-migrate-caj") <= 32',
+            '      error_message = "Container App Job name must be 32 characters or fewer."',
+            "    }",
+            "  }",
             "",
             "  depends_on = [time_sleep.migrator_propagation, azurerm_postgresql_flexible_server_database.main]",
             "}",
@@ -995,7 +1036,7 @@ jobs:
         host = workload_host(workload.get("kind"), values)
         build = workload.get("build") or {}
         if host == "container-apps":
-            command = build.get("image", "")
+            command = json.dumps(build.get("image", ""))
             steps.append(
                 f"""
       - name: Build {workload_id}
@@ -1003,26 +1044,29 @@ jobs:
           REGISTRY: ${{{{ steps.foundation-outputs.outputs.registry_login_server }}}}
           REPOSITORY: {name}-{workload_id}
           TAG: ${{{{ github.sha }}}}
+          BUILD_COMMAND: {command}
         run: |
           export IMAGE="$REGISTRY/$REPOSITORY:$TAG"
-          {command}
+          bash -c "$BUILD_COMMAND"
           printf '{{"{workload_id}": "%s"}}' "$IMAGE" > "$RUNNER_TEMP/images/{workload_id}.json"
 """
             )
         else:
-            command = build.get("package", "")
+            command = json.dumps(build.get("package", ""))
             steps.append(
                 f"""
       - name: Build {workload_id}
+        env:
+          BUILD_COMMAND: {command}
         run: |
           export PACKAGE="$RUNNER_TEMP/{workload_id}.zip"
-          {command}
+          bash -c "$BUILD_COMMAND"
 """
             )
 
     if derived["has_migration"]:
         migration = profile["database"]["migration"]
-        command = migration.get("build", {}).get("image", "")
+        command = json.dumps(migration.get("build", {}).get("image", ""))
         steps.append(
             f"""
       - name: Build migration
@@ -1030,9 +1074,10 @@ jobs:
           REGISTRY: ${{{{ steps.foundation-outputs.outputs.registry_login_server }}}}
           REPOSITORY: {name}-migration
           TAG: ${{{{ github.sha }}}}
+          BUILD_COMMAND: {command}
         run: |
           export IMAGE="$REGISTRY/$REPOSITORY:$TAG"
-          {command}
+          bash -c "$BUILD_COMMAND"
           printf '{{"migration": "%s"}}' "$IMAGE" > "$RUNNER_TEMP/images/migration.json"
 """
         )

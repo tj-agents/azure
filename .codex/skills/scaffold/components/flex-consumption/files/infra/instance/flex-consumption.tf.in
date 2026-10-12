@@ -38,5 +38,12 @@ resource "azurerm_function_app_flex_consumption" "main" {
 
   tags = local.tags
 
+  lifecycle {
+    precondition {
+      condition     = length("${local.instance_prefix}-${each.key}-func") <= 60
+      error_message = "Function App name must be 60 characters or fewer."
+    }
+  }
+
   depends_on = [time_sleep.function_storage_role_propagation]
 }
