@@ -21,7 +21,7 @@ ONLY_IF_LINE = re.compile(r"^@only-if\s+(!?)([a-zA-Z_][a-zA-Z0-9_]*)\s*$")
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9]{1,11}$")
 WORKLOAD_ID_PATTERN = re.compile(r"^[a-z][a-z0-9-]{0,15}$")
 ENV_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-PROBE_PATH_PATTERN = re.compile(r"^/")
+PROBE_PATH_PATTERN = re.compile(r"^/[A-Za-z0-9._~/?=&%-]*$")
 RUNTIME_NAMES = {"dotnet", "node", "python", "java"}
 WORKLOAD_KINDS = {"http", "background", "functions"}
 
@@ -522,9 +522,10 @@ def validate_profile(profile: object, values: dict) -> list[str]:
                 for probe_name in ("liveness", "readiness"):
                     path = probes.get(probe_name)
                     if not isinstance(path, str) or PROBE_PATH_PATTERN.match(path) is None:
-                        errors.append(f"{prefix}.probes.{probe_name}: must be a path starting with /")
-                    elif _has_actions_expression(path):
-                        errors.append(f"{prefix}.probes.{probe_name}: {path!r} must not contain '${{{{' or '}}}}'")
+                        errors.append(
+                            f"{prefix}.probes.{probe_name}: must be a URL path starting with /, using only letters, "
+                            "digits and ._~/?=&%-"
+                        )
             if host == "app-service" and not _valid_runtime(workload.get("runtime"), RUNTIME_NAMES):
                 errors.append(
                     f"{prefix}.runtime: required on app-service, name must be one of "
@@ -1406,6 +1407,7 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
       - name: Deploy {workload_id}
         env:
           RESOURCE_GROUP: ${{{{ steps.foundation-outputs.outputs.resource_group_name }}}}
+          READINESS_PATH: "{readiness}"
         run: |
           set -euo pipefail
           az webapp deploy \\
@@ -1419,7 +1421,7 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
             code=$(az webapp deployment slot show --slot staging \\
               --name "{name}-{workload_id}-app" \\
               --resource-group "$RESOURCE_GROUP" \\
-              --query defaultHostName -o tsv 2>/dev/null | xargs -I{{}} curl -s -o /dev/null -w '%{{http_code}}' "https://{{}}{readiness}" || echo "")
+              --query defaultHostName -o tsv 2>/dev/null | xargs -I{{}} curl -s -o /dev/null -w '%{{http_code}}' "https://{{}}$READINESS_PATH" || echo "")
             if [ "$code" = "200" ]; then
               became_ready=1
               break
@@ -1439,7 +1441,7 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
             code=$(az webapp show \\
               --name "{name}-{workload_id}-app" \\
               --resource-group "$RESOURCE_GROUP" \\
-              --query defaultHostName -o tsv 2>/dev/null | xargs -I{{}} curl -s -o /dev/null -w '%{{http_code}}' "https://{{}}{readiness}" || echo "")
+              --query defaultHostName -o tsv 2>/dev/null | xargs -I{{}} curl -s -o /dev/null -w '%{{http_code}}' "https://{{}}$READINESS_PATH" || echo "")
             if [ "$code" = "200" ]; then
               became_ready=1
               break

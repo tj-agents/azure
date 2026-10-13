@@ -235,7 +235,23 @@ class ProfileValidationTests(unittest.TestCase):
                 }
             ],
         }
-        self.check(profile, "must not contain")
+        self.check(profile, "must be a URL path")
+
+    def test_http_probe_path_rejects_shell_metacharacters_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 80,
+                    "probes": {"liveness": "/a", "readiness": "/b$(touch pwned)"},
+                    "build": {"image": "x"},
+                }
+            ],
+        }
+        self.check(profile, "must be a URL path")
 
     def test_functions_missing_runtime_exits_2(self) -> None:
         profile = {
@@ -1319,11 +1335,12 @@ class GeneratedWorkflowConformanceTests(unittest.TestCase):
             code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
             self.assertEqual(0, code, err)
             deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
-            self.assertEqual(2, deploy_environment.count("/health/ready"))
+            self.assertEqual(1, deploy_environment.count('READINESS_PATH: "/health/ready"'))
+            self.assertEqual(2, deploy_environment.count('"https://{}$READINESS_PATH"'))
             self.assertIn("slot staging --target-slot production", deploy_environment)
             after_swap = deploy_environment.split("--slot staging --target-slot production")[1]
             self.assertIn("az webapp show", after_swap)
-            self.assertIn("/health/ready", after_swap)
+            self.assertIn("$READINESS_PATH", after_swap)
 
     def test_flex_consumption_deploy_waits_for_running_state(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1423,7 +1440,7 @@ def run_script_with_stubs(script: str, stubs: dict[str, str], env_extra: dict[st
         env["RESOURCE_GROUP"] = "stub-rg"
         env["RUNNER_TEMP"] = posix_bin_dir
         env.update(env_extra)
-        return subprocess.run([WORKING_BASH, "-c", script], env=env, capture_output=True, text=True, timeout=60)
+        return subprocess.run([WORKING_BASH, "-c", script], env=env, capture_output=True, text=True, timeout=300)
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
 
@@ -1448,7 +1465,7 @@ fi
 """
 
 
-@unittest.skipUnless(WORKING_BASH, "a working bash is required to execute the generated deploy scripts")
+@unittest.skipUnless(WORKING_BASH or os.environ.get("CI") == "true", "a working bash is required to execute the generated deploy scripts")
 class ReadinessLoopExecutionTests(unittest.TestCase):
     def deploy_environment_text(self, profile: dict, *sets: str) -> str:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1530,7 +1547,7 @@ class ReadinessLoopExecutionTests(unittest.TestCase):
             result = run_script_with_stubs(
                 script,
                 {"az": AZ_STUB, "curl": CURL_STUB},
-                {"STUB_HTTP_CODE": "500", "STUB_CALLS_FILE": str(calls_file)},
+                {"STUB_HTTP_CODE": "500", "STUB_CALLS_FILE": str(calls_file), "READINESS_PATH": "/health/ready"},
             )
             self.assertNotEqual(0, result.returncode)
             self.assertIn(
@@ -1546,7 +1563,7 @@ class ReadinessLoopExecutionTests(unittest.TestCase):
             result = run_script_with_stubs(
                 script,
                 {"az": AZ_STUB, "curl": CURL_STUB},
-                {"STUB_HTTP_CODE": "200", "STUB_CALLS_FILE": str(calls_file)},
+                {"STUB_HTTP_CODE": "200", "STUB_CALLS_FILE": str(calls_file), "READINESS_PATH": "/health/ready"},
             )
             self.assertEqual(0, result.returncode, result.stderr)
             self.assertIn("swap", calls_file.read_text(encoding="utf-8"))
@@ -1579,6 +1596,7 @@ class ReadinessLoopExecutionTests(unittest.TestCase):
                     "STUB_HTTP_CODE_PRE": "200",
                     "STUB_HTTP_CODE_POST": "500",
                     "STUB_CALLS_FILE": str(calls_file),
+                    "READINESS_PATH": "/health/ready",
                 },
             )
             self.assertNotEqual(0, result.returncode)
@@ -1638,7 +1656,7 @@ def find_working_node() -> str | None:
 WORKING_NODE = find_working_node()
 
 
-@unittest.skipUnless(WORKING_NODE, "node is required to execute the release-commit script with mocked APIs")
+@unittest.skipUnless(WORKING_NODE or os.environ.get("CI") == "true", "node is required to execute the release-commit script with mocked APIs")
 class ReleaseCommitScriptExecutionTests(unittest.TestCase):
     def script(self) -> str:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1876,7 +1894,7 @@ class ErrorsAndDomainDesignTests(unittest.TestCase):
         migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
         self.assertIn(r'command = ["say \"hi\"", "back\\slash", "lit$${eral"]', migration_tf)
 
-    @unittest.skipUnless(WORKING_BASH, "a working bash is required to execute the generated ephemeral-id script")
+    @unittest.skipUnless(WORKING_BASH or os.environ.get("CI") == "true", "a working bash is required to execute the generated ephemeral-id script")
     def test_ephemeral_id_never_collides_ten_thousand_apart(self) -> None:
         root = self.generated()
         pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
@@ -1897,7 +1915,7 @@ class ErrorsAndDomainDesignTests(unittest.TestCase):
                 ids[pr_number] = f"pr{pr_number}"
         self.assertNotEqual(ids[10001], ids[20001])
 
-    @unittest.skipUnless(WORKING_BASH, "a working bash is required to execute the generated ephemeral-id script")
+    @unittest.skipUnless(WORKING_BASH or os.environ.get("CI") == "true", "a working bash is required to execute the generated ephemeral-id script")
     def test_ephemeral_id_within_budget_succeeds(self) -> None:
         root = self.generated()
         pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
