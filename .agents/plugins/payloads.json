@@ -3,5 +3,10 @@
     "azure": [
       "azure"
     ]
+  },
+  "dependencies": {
+    "azure": [
+      "base-agents/base"
+    ]
   }
 }
