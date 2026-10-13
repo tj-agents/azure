@@ -1270,6 +1270,67 @@ class GeneratedWorkflowConformanceTests(unittest.TestCase):
             dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
             self.assertIn("package-ecosystem: github-actions", dependabot)
             self.assertIn("interval: weekly", dependabot)
+            self.assertIn("groups:\n      github-actions:\n        patterns:\n          - \"*\"", dependabot)
+
+    def test_build_workload_resolves_the_pushed_image_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            action = (root / ".github/actions/build-workload/action.yml").read_text(encoding="utf-8")
+            self.assertIn("docker inspect --format='{{index .RepoDigests 0}}'", action)
+            self.assertIn('"$WORKLOAD_ID" "$digest_ref"', action)
+
+    def test_app_service_deploy_checks_health_after_the_swap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [
+                    {
+                        "id": "api",
+                        "kind": "http",
+                        "port": 8080,
+                        "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
+                        "runtime": {"name": "dotnet", "version": "10.0"},
+                        "build": {"package": "echo build"},
+                    }
+                ],
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertEqual(2, deploy_environment.count("/health/ready"))
+            self.assertIn("slot staging --target-slot production", deploy_environment)
+            after_swap = deploy_environment.split("--slot staging --target-slot production")[1]
+            self.assertIn("az webapp show", after_swap)
+            self.assertIn("/health/ready", after_swap)
+
+    def test_flex_consumption_deploy_waits_for_running_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [
+                    {
+                        "id": "fn",
+                        "kind": "functions",
+                        "runtime": {"name": "dotnet-isolated", "version": "10.0"},
+                        "build": {"package": "echo build"},
+                    }
+                ],
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertIn("az functionapp show", deploy_environment)
+            self.assertIn("--query state", deploy_environment)
+            self.assertIn('"$state" = "Running"', deploy_environment)
 
 
 def find_working_bash() -> str | None:
@@ -1346,6 +1407,27 @@ class ErrorsAndDomainDesignTests(unittest.TestCase):
         prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
         self.assertIn("concurrency:\n  group: prod\n  cancel-in-progress: false", prod_yml)
 
+    def test_prod_triggers_only_on_semver_tags(self) -> None:
+        root = self.generated()
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn('- "v[0-9]+.[0-9]+.[0-9]+"', prod_yml)
+        self.assertNotIn('"v*"', prod_yml)
+
+    def test_assert_release_commit_job_gates_the_deploy(self) -> None:
+        root = self.generated()
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn("assert-release-commit:", prod_yml)
+        self.assertIn("uses: actions/github-script@", prod_yml)
+        self.assertIn('workflow_id: "ci.yml"', prod_yml)
+        self.assertIn('branch: "main"', prod_yml)
+        self.assertIn('status: "success"', prod_yml)
+        self.assertIn("core.setFailed", prod_yml)
+        job_text = prod_yml.split("assert-release-commit:")[1].split("\n  validate:")[0]
+        self.assertIn("actions: read", job_text)
+        self.assertNotIn("id-token: write", job_text)
+        self.assertIn("needs: [assert-release-commit, validate]", prod_yml)
+        self.assertIn("needs.assert-release-commit.result == 'success'", prod_yml)
+
     def test_preview_apply_and_destroy_share_the_same_concurrency_group(self) -> None:
         root = self.generated()
         deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
@@ -1382,7 +1464,11 @@ class ErrorsAndDomainDesignTests(unittest.TestCase):
         ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("if: ${{ !cancelled() && needs.validate.result == 'success' && vars.AZURE_FOUNDATION_READY == 'true' }}", ci_yml)
         prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
-        self.assertIn("if: ${{ !cancelled() && needs.validate.result == 'success' }}", prod_yml)
+        self.assertIn(
+            "if: ${{ !cancelled() && needs.assert-release-commit.result == 'success' "
+            "&& needs.validate.result == 'success' }}",
+            prod_yml,
+        )
         pr_closed = (root / ".github/workflows/pr-closed.yml").read_text(encoding="utf-8")
         self.assertIn("!cancelled() && needs.compute-preview-id.result == 'success'", pr_closed)
 
