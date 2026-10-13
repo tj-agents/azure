@@ -74,7 +74,8 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
 - `name`: `^[a-z][a-z0-9]{1,11}$`.
 - `workloads`: a list, possibly empty, with unique `id` values matching `^[a-z][a-z0-9-]{0,15}$`.
   - `kind` is `http`, `background` or `functions`; it selects a host through the matching `*_host` option.
-  - `http` requires an integer `port` (1-65535) and `probes.liveness` / `probes.readiness` paths.
+  - `http` requires an integer `port` (1-65535) and `probes.liveness` / `probes.readiness` URL paths, which start
+    with `/` and use only letters, digits and `._~/?=&%-`.
   - `functions` requires `runtime.name` and `runtime.version`. An `http` workload on `app-service`
     requires `runtime`, whose `name` is one of `dotnet`, `node`, `python`, `java`.
   - `build.image` is required when the workload's host is Container Apps; `build.package` is required on
