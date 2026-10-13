@@ -37,6 +37,13 @@ resource "azurerm_linux_web_app" "main" {
 
   app_settings = local.settings[each.key]
 
+  dynamic "sticky_settings" {
+    for_each = length(each.value.sticky) > 0 ? [each.value.sticky] : []
+    content {
+      app_setting_names = sticky_settings.value
+    }
+  }
+
   tags = local.tags
 
   lifecycle {
