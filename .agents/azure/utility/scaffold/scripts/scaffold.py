@@ -1008,11 +1008,15 @@ AZURE_LOGIN_TAG = "v3.1.0"
 UPLOAD_ARTIFACT_ACTION = "actions/upload-artifact"
 UPLOAD_ARTIFACT_SHA = "cf430e030ddbb5b0abf93d22962f4752f3646cd9"
 UPLOAD_ARTIFACT_TAG = "v7.0.2"
+GITHUB_SCRIPT_ACTION = "actions/github-script"
+GITHUB_SCRIPT_SHA = "3a2844b7e9c422d3c10d287c895573f7108da1b3"
+GITHUB_SCRIPT_TAG = "v9.0.0"
 
 CHECKOUT_REF = f"{CHECKOUT_ACTION}@{CHECKOUT_SHA}  # {CHECKOUT_TAG}"
 SETUP_TERRAFORM_REF = f"{SETUP_TERRAFORM_ACTION}@{SETUP_TERRAFORM_SHA}  # {SETUP_TERRAFORM_TAG}"
 AZURE_LOGIN_REF = f"{AZURE_LOGIN_ACTION}@{AZURE_LOGIN_SHA}  # {AZURE_LOGIN_TAG}"
 UPLOAD_ARTIFACT_REF = f"{UPLOAD_ARTIFACT_ACTION}@{UPLOAD_ARTIFACT_SHA}  # {UPLOAD_ARTIFACT_TAG}"
+GITHUB_SCRIPT_REF = f"{GITHUB_SCRIPT_ACTION}@{GITHUB_SCRIPT_SHA}  # {GITHUB_SCRIPT_TAG}"
 
 
 def yaml_dq(text: str) -> str:
@@ -1122,7 +1126,8 @@ runs:
         mkdir -p "$RUNNER_TEMP/images"
         export IMAGE="$REGISTRY/$REPOSITORY:$TAG"
         bash -c "$BUILD_COMMAND"
-        printf '{"%s": "%s"}' "$WORKLOAD_ID" "$IMAGE" > "$RUNNER_TEMP/images/$WORKLOAD_ID.json"
+        digest_ref=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE")
+        printf '{"%s": "%s"}' "$WORKLOAD_ID" "$digest_ref" > "$RUNNER_TEMP/images/$WORKLOAD_ID.json"
 
     - name: Build a deployment package
       if: inputs.host != 'container-apps'
@@ -1146,6 +1151,10 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 """
 
 
@@ -1370,6 +1379,16 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
             --resource-group "$RESOURCE_GROUP" \\
             --src-path "$RUNNER_TEMP/{workload_id}.zip" \\
             --type zip
+          for _ in $(seq 1 30); do
+            state=$(az functionapp show \\
+              --name "{name}-{workload_id}-func" \\
+              --resource-group "$RESOURCE_GROUP" \\
+              --query state -o tsv 2>/dev/null || echo "")
+            if [ "$state" = "Running" ]; then
+              break
+            fi
+            sleep 10
+          done
 """
             )
         elif host == "app-service":
@@ -1401,6 +1420,16 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
             --name "{name}-{workload_id}-app" \\
             --resource-group "$RESOURCE_GROUP" \\
             --slot staging --target-slot production
+          for _ in $(seq 1 30); do
+            code=$(az webapp show \\
+              --name "{name}-{workload_id}-app" \\
+              --resource-group "$RESOURCE_GROUP" \\
+              --query defaultHostName -o tsv 2>/dev/null | xargs -I{{}} curl -s -o /dev/null -w '%{{http_code}}' "https://{{}}{readiness}" || echo "")
+            if [ "$code" = "200" ]; then
+              break
+            fi
+            sleep 10
+          done
 """
             )
         elif host == "container-apps":
@@ -1896,7 +1925,7 @@ def render_prod_workflow(values: dict) -> str:
 on:
   push:
     tags:
-      - "v*"
+      - "v[0-9]+.[0-9]+.[0-9]+"
 
 permissions:
   contents: read
@@ -1906,11 +1935,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  assert-release-commit:
+    name: Assert the release commit is the latest green CI run
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Compare the tag's commit against ci.yml's latest success on main
+        uses: {GITHUB_SCRIPT_REF}
+        env:
+          TAG_SHA: ${{{{ github.sha }}}}
+        with:
+          script: |
+            const {{ data }} = await github.rest.actions.listWorkflowRuns({{
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: "ci.yml",
+              branch: "main",
+              status: "success",
+              per_page: 1,
+            }});
+            const latestSha = data.workflow_runs[0]?.head_sha;
+            const tagSha = process.env.TAG_SHA;
+            if (!latestSha) {{
+              core.setFailed("no successful ci.yml run found on main");
+              return;
+            }}
+            if (latestSha !== tagSha) {{
+              core.setFailed(
+                `release commit ${{tagSha}} is not the latest green ci.yml run on main (${{latestSha}})`
+              );
+            }}
+
 {render_validate_job(terraform_version, [])}
   deploy-prod:
     name: Deploy the production environment
-    if: ${{{{ !cancelled() && needs.validate.result == 'success' }}}}
-    needs: [validate]
+    if: ${{{{ !cancelled() && needs.assert-release-commit.result == 'success' && needs.validate.result == 'success' }}}}
+    needs: [assert-release-commit, validate]
     permissions:
       id-token: write
       contents: read

@@ -80,6 +80,8 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
   - `build.image` is required when the workload's host is Container Apps; `build.package` is required on
     App Service or Flex Consumption. A workload may carry both; azure uses the one its host needs and
     ignores the other. A command may reference `$IMAGE`, `$TAG`, `$PACKAGE`, `$REGISTRY` and `$REPOSITORY`.
+    A `build.image` command must `docker push $IMAGE`: azure resolves the pushed digest from the local
+    image's `RepoDigests` afterward and deploys that, never the mutable `$TAG` reference.
     No `build.*` command may contain `${{` or `}}`; azure passes it to the workflow through a step `env:`
     value and runs it with `bash -c`, never splicing it into the YAML, but rejects the GitHub Actions
     expression syntax outright regardless. A `database.migration.command` entry is held to the same
@@ -171,8 +173,11 @@ should allow deployment from `v*` tags only.
   `apply`.
 - `ci.yml` has the fixed concurrency group `ci` (`cancel-in-progress: false`): the optional `verify` job,
   `validate`, then `deploy-ci` calling `deploy-environment.yml` for the `ci` environment.
-- `prod.yml` has the fixed concurrency group `prod`: on a `v*` tag push, `validate` then `deploy-prod`
-  calling `deploy-environment.yml` for the protected `prod` environment, using `prod.tfvars`.
+- `prod.yml` has the fixed concurrency group `prod`: on a semver tag push (`v[0-9]+.[0-9]+.[0-9]+`),
+  `assert-release-commit` fails the run (`::error::`) unless the tag's commit is the `headSha` of the
+  latest successful `ci.yml` run on `main` (via `actions/github-script`, `actions: read` only on that job);
+  then `validate`; then `deploy-prod`, needing both, calling `deploy-environment.yml` for the protected
+  `prod` environment, using `prod.tfvars`.
 - `pr-closed.yml`: on PR close, recomputes the same ephemeral id and, only if the PR carried the
   `deploy-preview` label, calls `destroy-preview.yml`.
 - `deploy-environment.yml` (`workflow_call`; inputs `environment`, `tfvars-file`, `ephemeral-id`): its job's
