@@ -1,4 +1,4 @@
-env    = "dev"
+env    = "ci"
 region = "uks"
 
 github_owner         = "changeme"

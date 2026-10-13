@@ -49,11 +49,23 @@ when the profile has no workloads.
 ```text
 <repo>/
   .scaffold.azure.json
-  .github/workflows/infra.yml
+  .github/
+    dependabot.yml
+    actions/
+      terraform-login-init/action.yml   Azure sign-in plus Terraform init, for jobs that touch state
+      build-workload/action.yml         builds one workload's image or package from its build command
+    workflows/
+      pr.yml                 verify, then plan, then an optional preview instance (ephemeral_id=pr<N>)
+      ci.yml                 push to main: verify, then deploy the shared ci environment
+      prod.yml               tag push v*: deploy through the protected prod environment
+      pr-closed.yml          destroys the PR's preview instance
+      deploy-environment.yml reusable (workflow_call): applies foundation and one instance
+      destroy-preview.yml    reusable (workflow_call): destroys one PR's instance
   infra/
     app.json             the app profile
     README.md
-    env/dev.tfvars
+    .gitignore
+    env/ci.tfvars  env/prod.tfvars
     foundation/
       versions.tf  providers.tf  backend.tf  variables.tf  locals.tf  outputs.tf
       main.tf               resource group, state storage, Log Analytics, deployment identity

@@ -20,11 +20,21 @@ scaffold = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(scaffold)
 
 EMPTY_WORKLOADS_FILES = {
-    ".github/workflows/infra.yml",
+    ".github/actions/build-workload/action.yml",
+    ".github/actions/terraform-login-init/action.yml",
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/deploy-environment.yml",
+    ".github/workflows/destroy-preview.yml",
+    ".github/workflows/pr-closed.yml",
+    ".github/workflows/pr.yml",
+    ".github/workflows/prod.yml",
     ".scaffold.azure.json",
+    "infra/.gitignore",
     "infra/README.md",
     "infra/app.json",
-    "infra/env/dev.tfvars",
+    "infra/env/ci.tfvars",
+    "infra/env/prod.tfvars",
     "infra/foundation/backend.tf",
     "infra/foundation/budget.tf",
     "infra/foundation/locals.tf",
@@ -210,6 +220,38 @@ class ProfileValidationTests(unittest.TestCase):
             ],
         }
         self.check(profile, "probes.liveness")
+
+    def test_http_probe_path_rejects_github_actions_expression_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 80,
+                    "probes": {"liveness": "/${{ secrets.FOO }}", "readiness": "/b"},
+                    "build": {"image": "x"},
+                }
+            ],
+        }
+        self.check(profile, "must be a URL path")
+
+    def test_http_probe_path_rejects_shell_metacharacters_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 80,
+                    "probes": {"liveness": "/a", "readiness": "/b$(touch pwned)"},
+                    "build": {"image": "x"},
+                }
+            ],
+        }
+        self.check(profile, "must be a URL path")
 
     def test_functions_missing_runtime_exits_2(self) -> None:
         profile = {
@@ -685,9 +727,11 @@ class IntoConflictTests(unittest.TestCase):
 
             shutil.rmtree(root / "infra" / "foundation")
             shutil.rmtree(root / "infra" / "instance")
+            shutil.rmtree(root / ".github")
             (root / "infra/README.md").unlink()
-            (root / "infra/env/dev.tfvars").unlink()
-            (root / ".github/workflows/infra.yml").unlink()
+            (root / "infra/env/ci.tfvars").unlink()
+            (root / "infra/env/prod.tfvars").unlink()
+            (root / "infra/.gitignore").unlink()
             (root / ".scaffold.azure.json").unlink()
 
             code, _, err = run(["new", "--into", str(root), "--profile", str(external), "--no-input"])
@@ -913,8 +957,982 @@ class BudgetTests(unittest.TestCase):
             self.assertIn('variable "budget_amount"', variables_tf)
             self.assertIn('variable "budget_start_date"', variables_tf)
             self.assertIn('variable "budget_alert_emails"', variables_tf)
-            dev_tfvars = (root / "infra/env/dev.tfvars").read_text(encoding="utf-8")
-            self.assertIn("budget_start_date", dev_tfvars)
+            ci_tfvars = (root / "infra/env/ci.tfvars").read_text(encoding="utf-8")
+            self.assertIn("budget_start_date", ci_tfvars)
+
+
+SHA_REF_PATTERN = re.compile(r"uses:\s*([^\s@]+)@([0-9a-f]{40})\s*#\s*(v[0-9][\w.()\- ]*)")
+
+
+class SchemasTests(unittest.TestCase):
+    def test_default_schema_is_public_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [{"id": "api", "kind": "background", "build": {"image": "x"}}],
+                "database": {"engine": "postgres", "migration": {"build": {"image": "x"}, "command": ["x"]}},
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
+            self.assertIn('GRANT USAGE ON SCHEMA "public"', migration_tf)
+            self.assertNotIn("CREATE SCHEMA", migration_tf)
+
+    def test_two_schemas_render_grants_for_both(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [{"id": "api", "kind": "background", "build": {"image": "x"}}],
+                "database": {
+                    "engine": "postgres",
+                    "schemas": ["public", "sandbox"],
+                    "migration": {"build": {"image": "x"}, "command": ["x"]},
+                },
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
+            self.assertIn(
+                'CREATE SCHEMA IF NOT EXISTS "sandbox" AUTHORIZATION "${azurerm_user_assigned_identity.migrator.name}"',
+                migration_tf,
+            )
+            self.assertNotIn('CREATE SCHEMA IF NOT EXISTS "public"', migration_tf)
+            for schema in ("public", "sandbox"):
+                self.assertIn(f'GRANT USAGE ON SCHEMA "{schema}"', migration_tf)
+                self.assertIn(f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "{schema}"', migration_tf)
+                self.assertIn(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{schema}"', migration_tf)
+                self.assertIn(f'IN SCHEMA "{schema}" GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES', migration_tf)
+                self.assertIn(f'IN SCHEMA "{schema}" GRANT USAGE, SELECT ON SEQUENCES', migration_tf)
+
+    def test_invalid_schema_name_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "database": {"engine": "postgres", "schemas": ["Not-Valid"]},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("profile.database.schemas", err)
+
+    def test_duplicate_schema_name_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "database": {"engine": "postgres", "schemas": ["public", "public"]},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("duplicate schema", err)
+
+
+class ServiceBusConsumeTests(unittest.TestCase):
+    def consume_profile(self, consumes: object) -> dict:
+        return {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "worker",
+                    "kind": "background",
+                    "build": {"image": "x"},
+                    "messaging": {"consumes": consumes},
+                }
+            ],
+        }
+
+    def test_empty_types_list_exits_2(self) -> None:
+        profile = self.consume_profile([{"topic": "orders", "types": []}])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(2, code)
+            self.assertIn("types", err)
+
+    def test_invalid_type_exits_2(self) -> None:
+        profile = self.consume_profile([{"topic": "orders", "types": ["not valid!"]}])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(2, code)
+            self.assertIn("types", err)
+
+    def test_duplicate_type_exits_2(self) -> None:
+        profile = self.consume_profile([{"topic": "orders", "types": ["created", "created"]}])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(2, code)
+            self.assertIn("duplicate type", err)
+
+    def test_per_subscription_filter_renders_from_its_own_types(self) -> None:
+        profile = self.consume_profile([{"topic": "orders", "types": ["created", "updated"]}])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(0, code, err)
+            service_bus_tf = (root / "infra/instance/service-bus.tf").read_text(encoding="utf-8")
+            self.assertIn(
+                'sql_filter      = "[type] IN (${join(", ", [for type in each.value.types : format("\'%s\'", type)])})"',
+                service_bus_tf,
+            )
+            self.assertNotIn("service_bus_handled_types", service_bus_tf)
+            workloads_tf = (root / "infra/instance/workloads.tf").read_text(encoding="utf-8")
+            self.assertIn('types = ["created", "updated"]', workloads_tf)
+
+    def test_default_rule_removal_step_present_only_with_consumes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = self.consume_profile([{"topic": "orders", "types": ["created"]}])
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertIn("Remove the default Service Bus subscription rule", deploy_environment)
+            self.assertIn("service_bus_default_rule_subscriptions", deploy_environment)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertNotIn("Remove the default Service Bus subscription rule", deploy_environment)
+
+
+class VerifyFieldTests(unittest.TestCase):
+    def test_verify_commands_rejects_actions_expression_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "verify": ["echo ${{ secrets.FOO }}"],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("must not contain", err)
+
+    def test_verify_rejects_empty_string_exits_2(self) -> None:
+        profile = {"schema_version": 1, "name": "demo", "workloads": [], "verify": [""]}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("profile.verify", err)
+
+    def test_verify_job_runs_before_azure_jobs_in_pr_and_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [],
+                "verify": ["dotnet restore", "dotnet build"],
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+            ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+            for text in (pr_yml, ci_yml):
+                self.assertIn("Verify the app stack", text)
+                self.assertIn("dotnet restore", text)
+                self.assertIn("dotnet build", text)
+                self.assertLess(text.index("verify:"), text.index("validate:"))
+
+    def test_no_verify_job_when_profile_omits_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+            self.assertNotIn("Verify the app stack", pr_yml)
+
+
+class WorkflowsGateTests(unittest.TestCase):
+    def test_workflows_false_writes_no_github_files_but_keeps_gitignore_and_prod_tfvars(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--set", "workflows=false", "--no-input"])
+            self.assertEqual(0, code, err)
+            written = files(root)
+            self.assertFalse(any(path.startswith(".github/") for path in written))
+            self.assertIn("infra/.gitignore", written)
+            self.assertIn("infra/env/prod.tfvars", written)
+
+
+class GeneratedWorkflowConformanceTests(unittest.TestCase):
+    def test_gitignore_excludes_state_but_keeps_the_lock_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            gitignore = (root / "infra/.gitignore").read_text(encoding="utf-8")
+            for pattern in (
+                ".terraform/",
+                "*.tfstate",
+                "*.tfstate.*",
+                "*.tfplan",
+                "tfplan",
+                "crash.log",
+                "crash.*.log",
+                "override.tf",
+                "override.tf.json",
+                "*_override.tf",
+                "*_override.tf.json",
+            ):
+                self.assertIn(pattern, gitignore.splitlines())
+            self.assertNotIn(".terraform.lock.hcl", gitignore)
+
+    def test_every_remote_uses_is_pinned_to_a_full_sha_with_a_version_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, SANDBOX_PROFILE)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            found = False
+            for path in (root / ".github").rglob("*.yml"):
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if not stripped.startswith("uses:") or stripped.startswith("uses: ./"):
+                        continue
+                    self.assertRegex(stripped, SHA_REF_PATTERN, f"{path}: {stripped}")
+                    found = True
+            self.assertTrue(found)
+
+    def test_every_checkout_persists_no_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, SANDBOX_PROFILE)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            checked = 0
+            for path in (root / ".github").rglob("*.yml"):
+                text = path.read_text(encoding="utf-8")
+                for match in re.finditer(r"uses: actions/checkout@[0-9a-f]{40}.*\n\s*with:\n\s*persist-credentials: false", text):
+                    checked += 1
+            self.assertGreater(checked, 0)
+
+    def test_top_level_permissions_are_contents_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, SANDBOX_PROFILE)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            checked = 0
+            for path in (root / ".github/workflows").glob("*.yml"):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("permissions:\n  contents: read", text, path)
+                checked += 1
+            self.assertEqual(6, checked)
+
+    def test_ci_complete_aggregator_in_pr_and_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, SANDBOX_PROFILE)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            for name in ("pr.yml", "ci.yml"):
+                text = (root / ".github/workflows" / name).read_text(encoding="utf-8")
+                self.assertIn("ci-complete:", text)
+                self.assertIn("if: always()", text)
+
+    def test_ephemeral_id_is_not_truncated(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+            self.assertNotIn(": -4", pr_yml)
+            self.assertIn('id="pr$digits"', pr_yml)
+            self.assertIn("::error file=.github/workflows/pr.yml::", pr_yml)
+
+    def test_preview_state_key_uses_pr_instance_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertIn("demo/instance.{0}.tfstate", deploy_environment)
+            destroy_preview = (root / ".github/workflows/destroy-preview.yml").read_text(encoding="utf-8")
+            self.assertIn("demo/instance.${{ inputs.ephemeral-id }}.tfstate", destroy_preview)
+
+    def test_dependabot_configures_github_actions_ecosystem_weekly(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
+            self.assertIn("package-ecosystem: github-actions", dependabot)
+            self.assertIn("interval: weekly", dependabot)
+            self.assertIn("groups:\n      github-actions:\n        patterns:\n          - \"*\"", dependabot)
+
+    def test_build_workload_resolves_the_pushed_image_digest(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            action = (root / ".github/actions/build-workload/action.yml").read_text(encoding="utf-8")
+            self.assertIn("docker inspect --format='{{index .RepoDigests 0}}'", action)
+            self.assertIn('"$WORKLOAD_ID" "$digest_ref"', action)
+
+    def test_app_service_deploy_checks_health_after_the_swap(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [
+                    {
+                        "id": "api",
+                        "kind": "http",
+                        "port": 8080,
+                        "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
+                        "runtime": {"name": "dotnet", "version": "10.0"},
+                        "build": {"package": "echo build"},
+                    }
+                ],
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertEqual(1, deploy_environment.count('READINESS_PATH: "/health/ready"'))
+            self.assertEqual(2, deploy_environment.count('"https://{}$READINESS_PATH"'))
+            self.assertIn("slot staging --target-slot production", deploy_environment)
+            after_swap = deploy_environment.split("--slot staging --target-slot production")[1]
+            self.assertIn("az webapp show", after_swap)
+            self.assertIn("$READINESS_PATH", after_swap)
+
+    def test_flex_consumption_deploy_waits_for_running_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [
+                    {
+                        "id": "fn",
+                        "kind": "functions",
+                        "runtime": {"name": "dotnet-isolated", "version": "10.0"},
+                        "build": {"package": "echo build"},
+                    }
+                ],
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertIn("az functionapp show", deploy_environment)
+            self.assertIn("--query state", deploy_environment)
+            self.assertIn('"$state" = "Running"', deploy_environment)
+
+
+def find_working_bash() -> str | None:
+    candidates = [shutil.which("bash")]
+    if os.name == "nt":
+        candidates += [
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files\Git\bin\bash.exe",
+        ]
+    for candidate in candidates:
+        if not candidate or not Path(candidate).is_file():
+            continue
+        try:
+            result = subprocess.run([candidate, "-c", "echo ok"], capture_output=True, text=True, timeout=10)
+        except OSError:
+            continue
+        if result.returncode == 0 and result.stdout.strip() == "ok":
+            return candidate
+    return None
+
+
+WORKING_BASH = find_working_bash()
+
+
+def extract_block(text: str, step_name: str, block_marker: str) -> str:
+    marker = f"- name: {step_name}\n"
+    start = text.index(marker)
+    run_start = text.index(block_marker, start) + len(block_marker)
+    lines = text[run_start:].splitlines()
+    indent = len(lines[0]) - len(lines[0].lstrip(" "))
+    body: list[str] = []
+    for line in lines:
+        if line.strip() == "":
+            body.append("")
+            continue
+        if len(line) - len(line.lstrip(" ")) < indent:
+            break
+        body.append(line[indent:])
+    return "\n".join(body)
+
+
+def extract_run_block(text: str, step_name: str) -> str:
+    return extract_block(text, step_name, "run: |\n")
+
+
+def extract_script_block(text: str, step_name: str) -> str:
+    return extract_block(text, step_name, "script: |\n")
+
+
+def write_stub(bin_dir: Path, name: str, body: str) -> None:
+    path = bin_dir / name
+    path.write_text("#!/bin/bash\n" + body + "\n", encoding="utf-8")
+    path.chmod(0o755)
+
+
+def to_posix_path(path: Path) -> str:
+    text = str(path).replace("\\", "/")
+    if len(text) >= 2 and text[1] == ":":
+        text = "/" + text[0].lower() + text[2:]
+    return text
+
+
+def run_script_with_stubs(script: str, stubs: dict[str, str], env_extra: dict[str, str]) -> subprocess.CompletedProcess:
+    temporary = tempfile.mkdtemp(prefix="azure-scaffold-stubs-")
+    try:
+        bin_dir = Path(temporary) / "bin"
+        bin_dir.mkdir()
+        write_stub(bin_dir, "sleep", "exit 0")
+        for stub_name, stub_body in stubs.items():
+            write_stub(bin_dir, stub_name, stub_body)
+        posix_bin_dir = to_posix_path(bin_dir)
+        env = dict(os.environ)
+        env["RESOURCE_GROUP"] = "stub-rg"
+        env["RUNNER_TEMP"] = posix_bin_dir
+        env.update(env_extra)
+        stubbed_script = f'export PATH="{posix_bin_dir}:/usr/bin:/bin:$PATH"\n' + script
+        return subprocess.run(
+            [WORKING_BASH, "-c", stubbed_script], env=env, capture_output=True, text=True, timeout=120
+        )
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
+AZ_STUB = """
+if [ "$1" = "webapp" ] && [ "$2" = "deploy" ]; then exit 0; fi
+if [ "$1" = "webapp" ] && [ "$2" = "deployment" ] && [ "$3" = "slot" ] && [ "$4" = "show" ]; then echo "stub-host"; exit 0; fi
+if [ "$1" = "webapp" ] && [ "$2" = "deployment" ] && [ "$3" = "slot" ] && [ "$4" = "swap" ]; then echo swap >> "$STUB_CALLS_FILE"; exit 0; fi
+if [ "$1" = "webapp" ] && [ "$2" = "show" ]; then echo "stub-host"; exit 0; fi
+if [ "$1" = "functionapp" ] && [ "$2" = "deploy" ]; then exit 0; fi
+if [ "$1" = "functionapp" ] && [ "$2" = "show" ]; then echo "${STUB_STATE:-}"; exit 0; fi
+if [ "$1" = "containerapp" ] && [ "$2" = "revision" ]; then echo "${STUB_HEALTH:-}"; exit 0; fi
+exit 1
+"""
+
+CURL_STUB = """
+if [ -n "${STUB_CALLS_FILE:-}" ] && grep -q swap "$STUB_CALLS_FILE" 2>/dev/null; then
+  printf '%s' "${STUB_HTTP_CODE_POST:-${STUB_HTTP_CODE:-000}}"
+else
+  printf '%s' "${STUB_HTTP_CODE_PRE:-${STUB_HTTP_CODE:-000}}"
+fi
+"""
+
+
+@unittest.skipUnless(WORKING_BASH or os.environ.get("CI") == "true", "a working bash is required to execute the generated deploy scripts")
+class ReadinessLoopExecutionTests(unittest.TestCase):
+    def deploy_environment_text(self, profile: dict, *sets: str) -> str:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            args = ["new", "--into", str(root), "--no-input"]
+            for item in sets:
+                args += ["--set", item]
+            code, _, err = run(args)
+            self.assertEqual(0, code, err)
+            return (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+
+    def test_flex_consumption_wait_fails_then_succeeds(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "fn",
+                    "kind": "functions",
+                    "runtime": {"name": "dotnet-isolated", "version": "10.0"},
+                    "build": {"package": "echo build"},
+                }
+            ],
+        }
+        text = self.deploy_environment_text(profile)
+        script = extract_run_block(text, "Deploy fn")
+
+        result = run_script_with_stubs(script, {"az": AZ_STUB}, {"STUB_STATE": "Stopped"})
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "::error file=.github/workflows/deploy-environment.yml::fn did not become Running within 5 minutes",
+            result.stderr,
+        )
+
+        result = run_script_with_stubs(script, {"az": AZ_STUB}, {"STUB_STATE": "Running"})
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_container_apps_wait_fails_then_succeeds(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [{"id": "worker", "kind": "background", "build": {"image": "echo build"}}],
+        }
+        text = self.deploy_environment_text(profile)
+        script = extract_run_block(text, "Wait for worker")
+
+        result = run_script_with_stubs(script, {"az": AZ_STUB}, {"STUB_HEALTH": "Unhealthy"})
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "::error file=.github/workflows/deploy-environment.yml::worker did not become Healthy within 5 minutes",
+            result.stderr,
+        )
+
+        result = run_script_with_stubs(script, {"az": AZ_STUB}, {"STUB_HEALTH": "Healthy"})
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_app_service_deploy_fails_before_swap_then_succeeds(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 8080,
+                    "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
+                    "runtime": {"name": "dotnet", "version": "10.0"},
+                    "build": {"package": "echo build"},
+                }
+            ],
+        }
+        text = self.deploy_environment_text(profile, "http_host=app-service")
+        script = extract_run_block(text, "Deploy api")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            calls_file = Path(temporary) / "calls"
+            calls_file.write_text("", encoding="utf-8")
+            result = run_script_with_stubs(
+                script,
+                {"az": AZ_STUB, "curl": CURL_STUB},
+                {"STUB_HTTP_CODE": "500", "STUB_CALLS_FILE": str(calls_file), "READINESS_PATH": "/health/ready"},
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn(
+                "::error file=.github/workflows/deploy-environment.yml::api staging slot did not become ready "
+                "within 5 minutes",
+                result.stderr,
+            )
+            self.assertEqual("", calls_file.read_text(encoding="utf-8"), "swap must not run before staging is ready")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            calls_file = Path(temporary) / "calls"
+            calls_file.write_text("", encoding="utf-8")
+            result = run_script_with_stubs(
+                script,
+                {"az": AZ_STUB, "curl": CURL_STUB},
+                {"STUB_HTTP_CODE": "200", "STUB_CALLS_FILE": str(calls_file), "READINESS_PATH": "/health/ready"},
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("swap", calls_file.read_text(encoding="utf-8"))
+
+    def test_app_service_deploy_fails_if_production_never_becomes_ready_after_the_swap(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 8080,
+                    "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
+                    "runtime": {"name": "dotnet", "version": "10.0"},
+                    "build": {"package": "echo build"},
+                }
+            ],
+        }
+        text = self.deploy_environment_text(profile, "http_host=app-service")
+        script = extract_run_block(text, "Deploy api")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            calls_file = Path(temporary) / "calls"
+            calls_file.write_text("", encoding="utf-8")
+            result = run_script_with_stubs(
+                script,
+                {"az": AZ_STUB, "curl": CURL_STUB},
+                {
+                    "STUB_HTTP_CODE_PRE": "200",
+                    "STUB_HTTP_CODE_POST": "500",
+                    "STUB_CALLS_FILE": str(calls_file),
+                    "READINESS_PATH": "/health/ready",
+                },
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn(
+                "::error file=.github/workflows/deploy-environment.yml::api production slot did not become ready "
+                "within 5 minutes",
+                result.stderr,
+            )
+            self.assertIn("swap", calls_file.read_text(encoding="utf-8"))
+
+
+NODE_HARNESS_TEMPLATE = """
+const tagType = process.env.MOCK_TAG_TYPE;
+const tagObjSha = process.env.MOCK_TAG_SHA;
+const derefSha = process.env.MOCK_DEREF_SHA || "";
+const latestSha = process.env.MOCK_LATEST_SHA || "";
+process.env.TAG_NAME = "v1.2.3";
+
+const github = {
+  rest: {
+    git: {
+      getRef: async () => ({ data: { object: { sha: tagObjSha, type: tagType } } }),
+      getTag: async () => ({ data: { object: { sha: derefSha } } }),
+    },
+    actions: {
+      listWorkflowRuns: async () => ({
+        data: { workflow_runs: latestSha ? [{ head_sha: latestSha }] : [] },
+      }),
+    },
+  },
+};
+const context = { repo: { owner: "o", repo: "r" } };
+let failedMessage = null;
+const core = { setFailed: (msg) => { failedMessage = msg; } };
+
+(async () => {
+  try {
+__SCRIPT__
+  } finally {
+    console.log(JSON.stringify({ failed: failedMessage }));
+  }
+})();
+"""
+
+
+def find_working_node() -> str | None:
+    candidate = shutil.which("node")
+    if not candidate:
+        return None
+    try:
+        result = subprocess.run([candidate, "--version"], capture_output=True, text=True, timeout=10)
+    except OSError:
+        return None
+    return candidate if result.returncode == 0 else None
+
+
+WORKING_NODE = find_working_node()
+
+
+@unittest.skipUnless(WORKING_NODE or os.environ.get("CI") == "true", "node is required to execute the release-commit script with mocked APIs")
+class ReleaseCommitScriptExecutionTests(unittest.TestCase):
+    def script(self) -> str:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+            return extract_script_block(prod_yml, "Compare the tag's commit against ci.yml's latest success on main")
+
+    def run_harness(self, mock_env: dict[str, str]) -> dict:
+        indented = "\n".join("  " + line if line else line for line in self.script().splitlines())
+        harness = NODE_HARNESS_TEMPLATE.replace("__SCRIPT__", indented)
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as handle:
+            handle.write(harness)
+            harness_path = handle.name
+        try:
+            env = dict(os.environ)
+            env.update(mock_env)
+            result = subprocess.run(
+                [WORKING_NODE, harness_path], env=env, capture_output=True, text=True, timeout=30
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            return json.loads(result.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(harness_path)
+
+    def test_lightweight_tag_matching_the_latest_green_run_succeeds(self) -> None:
+        outcome = self.run_harness(
+            {"MOCK_TAG_TYPE": "commit", "MOCK_TAG_SHA": "abc123", "MOCK_LATEST_SHA": "abc123"}
+        )
+        self.assertIsNone(outcome["failed"])
+
+    def test_lightweight_tag_mismatching_the_latest_green_run_fails(self) -> None:
+        outcome = self.run_harness(
+            {"MOCK_TAG_TYPE": "commit", "MOCK_TAG_SHA": "abc123", "MOCK_LATEST_SHA": "def456"}
+        )
+        self.assertIn("abc123", outcome["failed"])
+        self.assertIn("def456", outcome["failed"])
+
+    def test_annotated_tag_is_dereferenced_before_comparison(self) -> None:
+        outcome = self.run_harness(
+            {
+                "MOCK_TAG_TYPE": "tag",
+                "MOCK_TAG_SHA": "tag-object-sha",
+                "MOCK_DEREF_SHA": "abc123",
+                "MOCK_LATEST_SHA": "abc123",
+            }
+        )
+        self.assertIsNone(outcome["failed"])
+
+    def test_annotated_tag_mismatching_the_dereferenced_commit_fails(self) -> None:
+        outcome = self.run_harness(
+            {
+                "MOCK_TAG_TYPE": "tag",
+                "MOCK_TAG_SHA": "tag-object-sha",
+                "MOCK_DEREF_SHA": "abc123",
+                "MOCK_LATEST_SHA": "def456",
+            }
+        )
+        self.assertIn("abc123", outcome["failed"])
+        self.assertNotIn("tag-object-sha", outcome["failed"])
+
+    def test_no_successful_ci_run_fails(self) -> None:
+        outcome = self.run_harness({"MOCK_TAG_TYPE": "commit", "MOCK_TAG_SHA": "abc123", "MOCK_LATEST_SHA": ""})
+        self.assertEqual("no successful ci.yml run found on main", outcome["failed"])
+
+
+class ErrorsAndDomainDesignTests(unittest.TestCase):
+    def generated(self, profile: dict | None = None, *sets: str) -> Path:
+        self._temporary = tempfile.TemporaryDirectory()
+        root = new_project(self._temporary.name)
+        write_profile(root, profile or {"schema_version": 1, "name": "demo", "workloads": []})
+        args = ["new", "--into", str(root), "--no-input"]
+        for item in sets:
+            args += ["--set", item]
+        code, _, err = run(args)
+        self.assertEqual(0, code, err)
+        return root
+
+    def tearDown(self) -> None:
+        temporary = getattr(self, "_temporary", None)
+        if temporary is not None:
+            temporary.cleanup()
+
+    def test_pr_workflow_has_the_verification_concurrency_group(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}\n"
+            "  cancel-in-progress: true",
+            pr_yml,
+        )
+        self.assertIn("types: [opened, synchronize, reopened, labeled]", pr_yml)
+
+    def test_ci_and_prod_use_fixed_concurrency_groups(self) -> None:
+        root = self.generated()
+        ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("concurrency:\n  group: ci\n  cancel-in-progress: false", ci_yml)
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn("concurrency:\n  group: prod\n  cancel-in-progress: false", prod_yml)
+
+    def test_prod_triggers_only_on_semver_tags(self) -> None:
+        root = self.generated()
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn('- "v[0-9]+.[0-9]+.[0-9]+"', prod_yml)
+        self.assertNotIn('"v*"', prod_yml)
+
+    def test_assert_release_commit_job_gates_the_deploy(self) -> None:
+        root = self.generated()
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn("assert-release-commit:", prod_yml)
+        self.assertIn("uses: actions/github-script@", prod_yml)
+        self.assertIn('workflow_id: "ci.yml"', prod_yml)
+        self.assertIn('branch: "main"', prod_yml)
+        self.assertIn('status: "success"', prod_yml)
+        self.assertIn("core.setFailed", prod_yml)
+        job_text = prod_yml.split("assert-release-commit:")[1].split("\n  validate:")[0]
+        self.assertIn("actions: read", job_text)
+        self.assertNotIn("id-token: write", job_text)
+        self.assertIn("needs: [assert-release-commit, validate]", prod_yml)
+        self.assertIn("needs.assert-release-commit.result == 'success'", prod_yml)
+
+    def test_preview_apply_and_destroy_share_the_same_concurrency_group(self) -> None:
+        root = self.generated()
+        deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+        self.assertIn("group: ${{ inputs.ephemeral-id != '' && format('preview-{0}', inputs.ephemeral-id)", deploy_environment)
+        destroy_preview = (root / ".github/workflows/destroy-preview.yml").read_text(encoding="utf-8")
+        self.assertIn("group: preview-${{ inputs.ephemeral-id }}", destroy_preview)
+
+    def test_break_preview_lock_job_runs_only_when_cancelled(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertIn("break-preview-lock:", pr_yml)
+        self.assertIn(
+            "if: ${{ cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}", pr_yml
+        )
+        self.assertIn("az storage blob lease break", pr_yml)
+        self.assertIn("--auth-mode login", pr_yml)
+        self.assertIn("id-token: write", pr_yml.split("break-preview-lock:")[1].split("steps:")[0])
+
+    def test_every_runs_on_job_sets_timeout_minutes(self) -> None:
+        root = self.generated(SANDBOX_PROFILE)
+        for path in sorted((root / ".github/workflows").glob("*.yml")):
+            text = path.read_text(encoding="utf-8")
+            jobs_text = text.split("\njobs:\n", 1)[1]
+            jobs = re.split(r"\n  (?=[a-z][a-z0-9-]*:)", "\n" + jobs_text)
+            for job in jobs:
+                if not job.strip():
+                    continue
+                if re.search(r"\n {4}uses: \./\.github/workflows/", job):
+                    continue
+                self.assertIn("timeout-minutes:", job, f"{path}: {job.splitlines()[0]}")
+
+    def test_deploy_dependent_jobs_use_cancelled_and_result_pattern(self) -> None:
+        root = self.generated()
+        ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("if: ${{ !cancelled() && needs.validate.result == 'success' && vars.AZURE_FOUNDATION_READY == 'true' }}", ci_yml)
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "if: ${{ !cancelled() && needs.assert-release-commit.result == 'success' "
+            "&& needs.validate.result == 'success' }}",
+            prod_yml,
+        )
+        pr_closed = (root / ".github/workflows/pr-closed.yml").read_text(encoding="utf-8")
+        self.assertIn("!cancelled() && needs.compute-preview-id.result == 'success'", pr_closed)
+
+    def test_annotations_use_error_file_format(self) -> None:
+        root = self.generated()
+        for name in ("pr.yml", "ci.yml"):
+            text = (root / ".github/workflows" / name).read_text(encoding="utf-8")
+            self.assertIn(f"::error file=.github/workflows/{name}::", text)
+
+    def test_environments_are_ci_preview_prod(self) -> None:
+        root = self.generated()
+        ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: ci", ci_yml)
+        deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: ${{ inputs.environment }}", deploy_environment)
+        destroy_preview = (root / ".github/workflows/destroy-preview.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: preview", destroy_preview)
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: preview", pr_yml)
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: prod", prod_yml)
+
+    def test_no_dev_remnant_names_the_old_environment(self) -> None:
+        root = self.generated(SANDBOX_PROFILE)
+        self.assertTrue((root / "infra/env/ci.tfvars").is_file())
+        self.assertFalse((root / "infra/env/dev.tfvars").exists())
+        ci_tfvars = (root / "infra/env/ci.tfvars").read_text(encoding="utf-8")
+        self.assertIn('env    = "ci"', ci_tfvars)
+        for path in (root / ".github").rglob("*.yml"):
+            text = path.read_text(encoding="utf-8").replace("/dev/null", "")
+            self.assertNotRegex(text, r"\bdev\b", path)
+
+    def test_preview_requires_the_deploy_preview_label_and_no_var(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertIn("contains(github.event.pull_request.labels.*.name, 'deploy-preview')", pr_yml)
+        self.assertNotIn("AZURE_PREVIEW_ENABLED", pr_yml)
+        pr_closed = (root / ".github/workflows/pr-closed.yml").read_text(encoding="utf-8")
+        self.assertIn("contains(github.event.pull_request.labels.*.name, 'deploy-preview')", pr_closed)
+        self.assertNotIn("AZURE_PREVIEW_ENABLED", pr_closed)
+
+    def test_fork_safety_check_on_every_signing_in_pr_job(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertEqual(
+            3, pr_yml.count("github.event.pull_request.head.repo.full_name == github.repository")
+        )
+        pr_closed = (root / ".github/workflows/pr-closed.yml").read_text(encoding="utf-8")
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", pr_closed)
+
+    def test_compute_preview_id_job_has_no_checkout(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        job_text = pr_yml.split("compute-preview-id:")[1].split("\n  deploy-preview:")[0]
+        self.assertNotIn("actions/checkout", job_text)
+
+    def test_hcl_list_escapes_migration_command_items(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "database": {
+                "engine": "postgres",
+                "migration": {
+                    "build": {"image": "x"},
+                    "command": ['say "hi"', "back\\slash", "lit${eral"],
+                },
+            },
+        }
+        root = self.generated(profile)
+        migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
+        self.assertIn(r'command = ["say \"hi\"", "back\\slash", "lit$${eral"]', migration_tf)
+
+    @unittest.skipUnless(WORKING_BASH or os.environ.get("CI") == "true", "a working bash is required to execute the generated ephemeral-id script")
+    def test_ephemeral_id_never_collides_ten_thousand_apart(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        script = extract_run_block(pr_yml, "Compute the ephemeral id")
+        ids = {}
+        for pr_number in (10001, 20001):
+            with tempfile.TemporaryDirectory() as temporary:
+                output_file = Path(temporary) / "output"
+                output_file.write_text("", encoding="utf-8")
+                result = subprocess.run(
+                    [WORKING_BASH, "-c", script],
+                    env={**os.environ, "PR_NUMBER": str(pr_number), "GITHUB_OUTPUT": str(output_file)},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn("exceeds the 6-character limit", result.stderr)
+                ids[pr_number] = f"pr{pr_number}"
+        self.assertNotEqual(ids[10001], ids[20001])
+
+    @unittest.skipUnless(WORKING_BASH or os.environ.get("CI") == "true", "a working bash is required to execute the generated ephemeral-id script")
+    def test_ephemeral_id_within_budget_succeeds(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        script = extract_run_block(pr_yml, "Compute the ephemeral id")
+        with tempfile.TemporaryDirectory() as temporary:
+            output_file = Path(temporary) / "output"
+            output_file.write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [WORKING_BASH, "-c", script],
+                env={**os.environ, "PR_NUMBER": "42", "GITHUB_OUTPUT": str(output_file)},
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("ephemeral-id=pr42\n", output_file.read_text(encoding="utf-8"))
 
 
 def generate(root: Path, profile: dict, *sets: str) -> Path:
@@ -999,7 +2017,10 @@ class TerraformGateTests(unittest.TestCase):
                         "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
                         "build": {"image": "echo build-api"},
                         "settings": {"ServiceBus__Namespace": "{servicebus.namespace}"},
-                        "messaging": {"publishes": ["orders"], "consumes": ["orders"]},
+                        "messaging": {
+                            "publishes": ["orders"],
+                            "consumes": [{"topic": "orders", "types": ["order-placed"]}],
+                        },
                     }
                 ],
             }
