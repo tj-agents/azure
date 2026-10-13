@@ -1015,6 +1015,40 @@ class StickySettingsTests(unittest.TestCase):
             self.assertIn('dynamic "sticky_settings"', app_service_tf)
             self.assertIn("length(each.value.sticky) > 0", app_service_tf)
 
+    def test_malformed_settings_with_sticky_exits_2_without_writes(self) -> None:
+        for scope in ("profile", "workload"):
+            for settings in (7, [["KEY"]]):
+                with self.subTest(scope=scope, settings=settings), tempfile.TemporaryDirectory() as temporary:
+                    root = new_project(temporary)
+                    profile = self.app_service_profile(sticky=[])
+                    target = profile if scope == "profile" else profile["workloads"][0]
+                    target["settings"] = settings
+                    write_profile(root, profile)
+                    before = files(root)
+
+                    code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+
+                    self.assertEqual(2, code, err)
+                    self.assertIn("settings: must be an object", err)
+                    self.assertEqual(before, files(root))
+
+    def test_malformed_settings_with_sticky_exits_2_without_writes(self) -> None:
+        for scope in ("profile", "workload"):
+            for settings in (7, [["KEY"]]):
+                with self.subTest(scope=scope, settings=settings), tempfile.TemporaryDirectory() as temporary:
+                    root = new_project(temporary)
+                    profile = self.app_service_profile(sticky=[])
+                    target = profile if scope == "profile" else profile["workloads"][0]
+                    target["settings"] = settings
+                    write_profile(root, profile)
+                    before = files(root)
+
+                    code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+
+                    self.assertEqual(2, code, err)
+                    self.assertIn("settings: must be an object", err)
+                    self.assertEqual(before, files(root))
+
     def test_empty_sticky_list_is_valid(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = new_project(temporary)

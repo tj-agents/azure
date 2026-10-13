@@ -363,5 +363,13 @@ it. This slice touches no workflow, so the `github-actions` contracts don't appl
 
 ## Next Steps
 
-1. Push `Feature/StickySlotSettings` for review and PR (Tommy opens it).
-2. dotnet slice E, which hands `verify` and `database.schemas` to this profile.
+1. Repair B001, finish independent review, then open and merge the sticky-settings PR.
+2. Finish and deliver the dotnet snippet-gate branch.
+3. Move the complete workflow set to github-actions; Azure supplies only its own steps.
+4. Collapse dotnet scaffolding to its one Web API shape; slice E is folded into item 0b of the canonical handoff.
+
+## Codex pickup - 2026-10-13
+
+The successor owns this branch and the canonical handoff at `C:\Users\TommySeery\.claude\plans\tj-agents\HANDOFF_STANDARDS_REMAINING.md`. Tommy authorized available models for implementation and independent review on 2026-10-13, superseding the earlier model-capacity gate. Phase lane: L4, a specified local repair with regression coverage, executed by the current owner under that override.
+
+B001 is repaired by guarding effective-settings key resolution with dictionary checks. Nine sticky tests pass, including a regression with four malformed top-level/workload cases that verifies exit 2 without writes. Generated outputs are current. Full Azure/Terraform validation and independent review are next; no subscription plan/apply/az command is authorized.
