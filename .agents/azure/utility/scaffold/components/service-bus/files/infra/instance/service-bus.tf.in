@@ -7,7 +7,11 @@ locals {
 
   consume_entries = merge([
     for id, workload in local.workloads : {
-      for topic in workload.consumes : "${id}-${topic}" => { id = id, topic = topic }
+      for entry in workload.consumes : "${id}-${entry.topic}" => {
+        id    = id
+        topic = entry.topic
+        types = entry.types
+      }
     }
   ]...)
 }
@@ -30,7 +34,7 @@ resource "azurerm_servicebus_subscription_rule" "handled_types" {
   name            = "handled-types"
   subscription_id = azurerm_servicebus_subscription.main[each.key].id
   filter_type     = "SqlFilter"
-  sql_filter      = join(" OR ", [for type in var.service_bus_handled_types : "type = '${type}'"])
+  sql_filter      = "[type] IN (${join(", ", [for type in each.value.types : format("'%s'", type)])})"
 }
 
 resource "azurerm_role_assignment" "service_bus_receiver" {
