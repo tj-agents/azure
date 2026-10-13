@@ -1,6 +1,8 @@
 {
   "plugin": "azure",
-  "dependencies": [],
+  "dependencies": [
+    "base-agents/base"
+  ],
   "profiles": {
     "core": [
       "build",
