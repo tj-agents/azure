@@ -45,7 +45,7 @@
     "workflows": {
       "type": "bool",
       "default": true,
-      "description": "Write `.github/workflows/infra.yml`."
+      "description": "Write the GitHub Actions workflows and composite actions under `.github/`."
     },
     "terraform_version": {
       "type": "string",

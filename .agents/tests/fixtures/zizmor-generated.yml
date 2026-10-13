@@ -1,0 +1,11 @@
+# self-repository (GitHub's "$/..." uses: syntax, introduced July 2026) is ignored here because
+# actionlint v1.7.12 does not parse that syntax yet; switch once actionlint supports it.
+rules:
+  self-repository:
+    ignore:
+      - pr.yml
+      - ci.yml
+      - prod.yml
+      - pr-closed.yml
+      - deploy-environment.yml
+      - destroy-preview.yml

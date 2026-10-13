@@ -1,5 +1,0 @@
-variable "service_bus_handled_types" {
-  type        = list(string)
-  default     = []
-  description = "Application-property `type` values this instance's subscriptions accept."
-}
