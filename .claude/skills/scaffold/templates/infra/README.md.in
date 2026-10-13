@@ -102,8 +102,9 @@ instance plan with the built images, deploys each package (Flex Consumption via 
 then waits for the function app's state to become `Running`; App Service via a staging-slot deploy, a
 readiness wait, a slot swap, then the same readiness wait against production), and waits for each Container
 App's revision to become `Healthy` — a deploy isn't done until the new code is serving, not merely
-deployed. If any workload consumes a topic, it also removes each subscription's `$Default` rule, reading the
-subscription list from a Terraform output rather than inlining it.
+deployed, and each wait fails the job with `::error::` if it times out (5 minutes) rather than silently
+continuing. If any workload consumes a topic, it also removes each subscription's `$Default` rule, reading
+the subscription list from a Terraform output rather than inlining it.
 
 A pull request's preview instance deploys with the full `ephemeral_id=pr<N>` — never truncated, so two PRs
 can never collide on the same preview's state key — through `destroy-preview.yml` using the same id on
