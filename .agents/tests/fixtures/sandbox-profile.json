@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "name": "demo",
+  "workloads": [
+    {
+      "id": "api",
+      "kind": "http",
+      "port": 8080,
+      "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
+      "build": {"image": "echo build-api"},
+      "messaging": {
+        "publishes": ["orders"],
+        "consumes": [{"topic": "orders", "types": ["order-placed", "order-cancelled"]}]
+      }
+    },
+    {"id": "worker", "kind": "background", "build": {"image": "echo build-worker"}},
+    {
+      "id": "fn",
+      "kind": "functions",
+      "runtime": {"name": "dotnet-isolated", "version": "10.0"},
+      "build": {"package": "echo build-fn"}
+    }
+  ],
+  "database": {
+    "engine": "postgres",
+    "schemas": ["public", "sandbox"],
+    "migration": {
+      "build": {"image": "echo build-migrate"},
+      "command": ["dotnet", "ef", "database", "update"]
+    }
+  },
+  "settings": {
+    "ConnectionStrings__Postgres": "Host={postgres.host};Database={postgres.database};Username={postgres.user};Ssl Mode=Require",
+    "APPLICATIONINSIGHTS_CONNECTION_STRING": "{monitor.connection_string}",
+    "AZURE_CLIENT_ID": "{identity.client_id}"
+  },
+  "verify": ["dotnet restore", "dotnet build --no-restore", "dotnet test --no-build"]
+}
