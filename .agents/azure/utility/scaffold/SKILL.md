@@ -189,7 +189,8 @@ should allow deployment from `v*` tags only.
   `instance` root at key `<name>/instance.tfstate`, or `<name>/instance.<ephemeral-id>.tfstate` when
   ephemeral; runs the migration job if the profile has one; applies the instance with
   `-var ephemeral_id=$EPHEMERAL_ID` (always passed, empty by default); and deploys each package or waits for
-  each Container App to become healthy.
+  each Container App to become healthy — every wait fails the job with `::error::` on a 5-minute timeout,
+  it never silently moves on.
 - `destroy-preview.yml` (`workflow_call`; inputs `ephemeral-id`, `tfvars-file`): its job shares the same
   `preview-<ephemeral-id>` concurrency group, initializes the `instance` root at that PR's ephemeral key and
   runs `terraform destroy`.

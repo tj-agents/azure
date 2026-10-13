@@ -523,6 +523,8 @@ def validate_profile(profile: object, values: dict) -> list[str]:
                     path = probes.get(probe_name)
                     if not isinstance(path, str) or PROBE_PATH_PATTERN.match(path) is None:
                         errors.append(f"{prefix}.probes.{probe_name}: must be a path starting with /")
+                    elif _has_actions_expression(path):
+                        errors.append(f"{prefix}.probes.{probe_name}: {path!r} must not contain '${{{{' or '}}}}'")
             if host == "app-service" and not _valid_runtime(workload.get("runtime"), RUNTIME_NAMES):
                 errors.append(
                     f"{prefix}.runtime: required on app-service, name must be one of "
@@ -1379,16 +1381,22 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
             --resource-group "$RESOURCE_GROUP" \\
             --src-path "$RUNNER_TEMP/{workload_id}.zip" \\
             --type zip
+          became_ready=""
           for _ in $(seq 1 30); do
             state=$(az functionapp show \\
               --name "{name}-{workload_id}-func" \\
               --resource-group "$RESOURCE_GROUP" \\
               --query state -o tsv 2>/dev/null || echo "")
             if [ "$state" = "Running" ]; then
+              became_ready=1
               break
             fi
             sleep 10
           done
+          if [ -z "$became_ready" ]; then
+            echo "::error file=.github/workflows/deploy-environment.yml::{workload_id} did not become Running within 5 minutes" >&2
+            exit 1
+          fi
 """
             )
         elif host == "app-service":
@@ -1406,30 +1414,42 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
             --slot staging \\
             --src-path "$RUNNER_TEMP/{workload_id}.zip" \\
             --type zip
+          became_ready=""
           for _ in $(seq 1 30); do
             code=$(az webapp deployment slot show --slot staging \\
               --name "{name}-{workload_id}-app" \\
               --resource-group "$RESOURCE_GROUP" \\
               --query defaultHostName -o tsv 2>/dev/null | xargs -I{{}} curl -s -o /dev/null -w '%{{http_code}}' "https://{{}}{readiness}" || echo "")
             if [ "$code" = "200" ]; then
+              became_ready=1
               break
             fi
             sleep 10
           done
+          if [ -z "$became_ready" ]; then
+            echo "::error file=.github/workflows/deploy-environment.yml::{workload_id} staging slot did not become ready within 5 minutes" >&2
+            exit 1
+          fi
           az webapp deployment slot swap \\
             --name "{name}-{workload_id}-app" \\
             --resource-group "$RESOURCE_GROUP" \\
             --slot staging --target-slot production
+          became_ready=""
           for _ in $(seq 1 30); do
             code=$(az webapp show \\
               --name "{name}-{workload_id}-app" \\
               --resource-group "$RESOURCE_GROUP" \\
               --query defaultHostName -o tsv 2>/dev/null | xargs -I{{}} curl -s -o /dev/null -w '%{{http_code}}' "https://{{}}{readiness}" || echo "")
             if [ "$code" = "200" ]; then
+              became_ready=1
               break
             fi
             sleep 10
           done
+          if [ -z "$became_ready" ]; then
+            echo "::error file=.github/workflows/deploy-environment.yml::{workload_id} production slot did not become ready within 5 minutes" >&2
+            exit 1
+          fi
 """
             )
         elif host == "container-apps":
@@ -1440,16 +1460,22 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
           RESOURCE_GROUP: ${{{{ steps.foundation-outputs.outputs.resource_group_name }}}}
         run: |
           set -euo pipefail
+          became_ready=""
           for _ in $(seq 1 30); do
-            ready=$(az containerapp revision list \\
+            health=$(az containerapp revision list \\
               --name "{name}-{workload_id}-ca" \\
               --resource-group "$RESOURCE_GROUP" \\
               --query "[?properties.active].properties.healthState" -o tsv 2>/dev/null || echo "")
-            if echo "$ready" | grep -q Healthy; then
+            if echo "$health" | grep -q Healthy; then
+              became_ready=1
               break
             fi
             sleep 10
           done
+          if [ -z "$became_ready" ]; then
+            echo "::error file=.github/workflows/deploy-environment.yml::{workload_id} did not become Healthy within 5 minutes" >&2
+            exit 1
+          fi
 """
             )
     return steps
@@ -1946,9 +1972,25 @@ jobs:
       - name: Compare the tag's commit against ci.yml's latest success on main
         uses: {GITHUB_SCRIPT_REF}
         env:
-          TAG_SHA: ${{{{ github.sha }}}}
+          TAG_NAME: ${{{{ github.ref_name }}}}
         with:
           script: |
+            const tagName = process.env.TAG_NAME;
+            const tagRef = await github.rest.git.getRef({{
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: `tags/${{tagName}}`,
+            }});
+            let tagSha = tagRef.data.object.sha;
+            if (tagRef.data.object.type === "tag") {{
+              const annotatedTag = await github.rest.git.getTag({{
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_sha: tagSha,
+              }});
+              tagSha = annotatedTag.data.object.sha;
+            }}
+
             const {{ data }} = await github.rest.actions.listWorkflowRuns({{
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -1958,7 +2000,6 @@ jobs:
               per_page: 1,
             }});
             const latestSha = data.workflow_runs[0]?.head_sha;
-            const tagSha = process.env.TAG_SHA;
             if (!latestSha) {{
               core.setFailed("no successful ci.yml run found on main");
               return;

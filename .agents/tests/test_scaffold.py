@@ -221,6 +221,22 @@ class ProfileValidationTests(unittest.TestCase):
         }
         self.check(profile, "probes.liveness")
 
+    def test_http_probe_path_rejects_github_actions_expression_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 80,
+                    "probes": {"liveness": "/${{ secrets.FOO }}", "readiness": "/b"},
+                    "build": {"image": "x"},
+                }
+            ],
+        }
+        self.check(profile, "must not contain")
+
     def test_functions_missing_runtime_exits_2(self) -> None:
         profile = {
             "schema_version": 1,
@@ -1355,11 +1371,10 @@ def find_working_bash() -> str | None:
 WORKING_BASH = find_working_bash()
 
 
-def extract_run_block(text: str, step_name: str) -> str:
+def extract_block(text: str, step_name: str, block_marker: str) -> str:
     marker = f"- name: {step_name}\n"
     start = text.index(marker)
-    run_marker = "run: |\n"
-    run_start = text.index(run_marker, start) + len(run_marker)
+    run_start = text.index(block_marker, start) + len(block_marker)
     lines = text[run_start:].splitlines()
     indent = len(lines[0]) - len(lines[0].lstrip(" "))
     body: list[str] = []
@@ -1371,6 +1386,325 @@ def extract_run_block(text: str, step_name: str) -> str:
             break
         body.append(line[indent:])
     return "\n".join(body)
+
+
+def extract_run_block(text: str, step_name: str) -> str:
+    return extract_block(text, step_name, "run: |\n")
+
+
+def extract_script_block(text: str, step_name: str) -> str:
+    return extract_block(text, step_name, "script: |\n")
+
+
+def write_stub(bin_dir: Path, name: str, body: str) -> None:
+    path = bin_dir / name
+    path.write_text("#!/bin/bash\n" + body + "\n", encoding="utf-8")
+    path.chmod(0o755)
+
+
+def to_posix_path(path: Path) -> str:
+    text = str(path).replace("\\", "/")
+    if len(text) >= 2 and text[1] == ":":
+        text = "/" + text[0].lower() + text[2:]
+    return text
+
+
+def run_script_with_stubs(script: str, stubs: dict[str, str], env_extra: dict[str, str]) -> subprocess.CompletedProcess:
+    temporary = tempfile.mkdtemp(prefix="azure-scaffold-stubs-")
+    try:
+        bin_dir = Path(temporary) / "bin"
+        bin_dir.mkdir()
+        write_stub(bin_dir, "sleep", "exit 0")
+        for stub_name, stub_body in stubs.items():
+            write_stub(bin_dir, stub_name, stub_body)
+        posix_bin_dir = to_posix_path(bin_dir)
+        env = dict(os.environ)
+        env["PATH"] = f"{posix_bin_dir}:{env.get('PATH', '')}"
+        env["RESOURCE_GROUP"] = "stub-rg"
+        env["RUNNER_TEMP"] = posix_bin_dir
+        env.update(env_extra)
+        return subprocess.run([WORKING_BASH, "-c", script], env=env, capture_output=True, text=True, timeout=60)
+    finally:
+        shutil.rmtree(temporary, ignore_errors=True)
+
+
+AZ_STUB = """
+if [ "$1" = "webapp" ] && [ "$2" = "deploy" ]; then exit 0; fi
+if [ "$1" = "webapp" ] && [ "$2" = "deployment" ] && [ "$3" = "slot" ] && [ "$4" = "show" ]; then echo "stub-host"; exit 0; fi
+if [ "$1" = "webapp" ] && [ "$2" = "deployment" ] && [ "$3" = "slot" ] && [ "$4" = "swap" ]; then echo swap >> "$STUB_CALLS_FILE"; exit 0; fi
+if [ "$1" = "webapp" ] && [ "$2" = "show" ]; then echo "stub-host"; exit 0; fi
+if [ "$1" = "functionapp" ] && [ "$2" = "deploy" ]; then exit 0; fi
+if [ "$1" = "functionapp" ] && [ "$2" = "show" ]; then echo "${STUB_STATE:-}"; exit 0; fi
+if [ "$1" = "containerapp" ] && [ "$2" = "revision" ]; then echo "${STUB_HEALTH:-}"; exit 0; fi
+exit 1
+"""
+
+CURL_STUB = """
+if [ -n "${STUB_CALLS_FILE:-}" ] && grep -q swap "$STUB_CALLS_FILE" 2>/dev/null; then
+  printf '%s' "${STUB_HTTP_CODE_POST:-${STUB_HTTP_CODE:-000}}"
+else
+  printf '%s' "${STUB_HTTP_CODE_PRE:-${STUB_HTTP_CODE:-000}}"
+fi
+"""
+
+
+@unittest.skipUnless(WORKING_BASH, "a working bash is required to execute the generated deploy scripts")
+class ReadinessLoopExecutionTests(unittest.TestCase):
+    def deploy_environment_text(self, profile: dict, *sets: str) -> str:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            args = ["new", "--into", str(root), "--no-input"]
+            for item in sets:
+                args += ["--set", item]
+            code, _, err = run(args)
+            self.assertEqual(0, code, err)
+            return (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+
+    def test_flex_consumption_wait_fails_then_succeeds(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "fn",
+                    "kind": "functions",
+                    "runtime": {"name": "dotnet-isolated", "version": "10.0"},
+                    "build": {"package": "echo build"},
+                }
+            ],
+        }
+        text = self.deploy_environment_text(profile)
+        script = extract_run_block(text, "Deploy fn")
+
+        result = run_script_with_stubs(script, {"az": AZ_STUB}, {"STUB_STATE": "Stopped"})
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "::error file=.github/workflows/deploy-environment.yml::fn did not become Running within 5 minutes",
+            result.stderr,
+        )
+
+        result = run_script_with_stubs(script, {"az": AZ_STUB}, {"STUB_STATE": "Running"})
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_container_apps_wait_fails_then_succeeds(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [{"id": "worker", "kind": "background", "build": {"image": "echo build"}}],
+        }
+        text = self.deploy_environment_text(profile)
+        script = extract_run_block(text, "Wait for worker")
+
+        result = run_script_with_stubs(script, {"az": AZ_STUB}, {"STUB_HEALTH": "Unhealthy"})
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(
+            "::error file=.github/workflows/deploy-environment.yml::worker did not become Healthy within 5 minutes",
+            result.stderr,
+        )
+
+        result = run_script_with_stubs(script, {"az": AZ_STUB}, {"STUB_HEALTH": "Healthy"})
+        self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_app_service_deploy_fails_before_swap_then_succeeds(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 8080,
+                    "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
+                    "runtime": {"name": "dotnet", "version": "10.0"},
+                    "build": {"package": "echo build"},
+                }
+            ],
+        }
+        text = self.deploy_environment_text(profile, "http_host=app-service")
+        script = extract_run_block(text, "Deploy api")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            calls_file = Path(temporary) / "calls"
+            calls_file.write_text("", encoding="utf-8")
+            result = run_script_with_stubs(
+                script,
+                {"az": AZ_STUB, "curl": CURL_STUB},
+                {"STUB_HTTP_CODE": "500", "STUB_CALLS_FILE": str(calls_file)},
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn(
+                "::error file=.github/workflows/deploy-environment.yml::api staging slot did not become ready "
+                "within 5 minutes",
+                result.stderr,
+            )
+            self.assertEqual("", calls_file.read_text(encoding="utf-8"), "swap must not run before staging is ready")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            calls_file = Path(temporary) / "calls"
+            calls_file.write_text("", encoding="utf-8")
+            result = run_script_with_stubs(
+                script,
+                {"az": AZ_STUB, "curl": CURL_STUB},
+                {"STUB_HTTP_CODE": "200", "STUB_CALLS_FILE": str(calls_file)},
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertIn("swap", calls_file.read_text(encoding="utf-8"))
+
+    def test_app_service_deploy_fails_if_production_never_becomes_ready_after_the_swap(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 8080,
+                    "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
+                    "runtime": {"name": "dotnet", "version": "10.0"},
+                    "build": {"package": "echo build"},
+                }
+            ],
+        }
+        text = self.deploy_environment_text(profile, "http_host=app-service")
+        script = extract_run_block(text, "Deploy api")
+
+        with tempfile.TemporaryDirectory() as temporary:
+            calls_file = Path(temporary) / "calls"
+            calls_file.write_text("", encoding="utf-8")
+            result = run_script_with_stubs(
+                script,
+                {"az": AZ_STUB, "curl": CURL_STUB},
+                {
+                    "STUB_HTTP_CODE_PRE": "200",
+                    "STUB_HTTP_CODE_POST": "500",
+                    "STUB_CALLS_FILE": str(calls_file),
+                },
+            )
+            self.assertNotEqual(0, result.returncode)
+            self.assertIn(
+                "::error file=.github/workflows/deploy-environment.yml::api production slot did not become ready "
+                "within 5 minutes",
+                result.stderr,
+            )
+            self.assertIn("swap", calls_file.read_text(encoding="utf-8"))
+
+
+NODE_HARNESS_TEMPLATE = """
+const tagType = process.env.MOCK_TAG_TYPE;
+const tagObjSha = process.env.MOCK_TAG_SHA;
+const derefSha = process.env.MOCK_DEREF_SHA || "";
+const latestSha = process.env.MOCK_LATEST_SHA || "";
+process.env.TAG_NAME = "v1.2.3";
+
+const github = {
+  rest: {
+    git: {
+      getRef: async () => ({ data: { object: { sha: tagObjSha, type: tagType } } }),
+      getTag: async () => ({ data: { object: { sha: derefSha } } }),
+    },
+    actions: {
+      listWorkflowRuns: async () => ({
+        data: { workflow_runs: latestSha ? [{ head_sha: latestSha }] : [] },
+      }),
+    },
+  },
+};
+const context = { repo: { owner: "o", repo: "r" } };
+let failedMessage = null;
+const core = { setFailed: (msg) => { failedMessage = msg; } };
+
+(async () => {
+  try {
+__SCRIPT__
+  } finally {
+    console.log(JSON.stringify({ failed: failedMessage }));
+  }
+})();
+"""
+
+
+def find_working_node() -> str | None:
+    candidate = shutil.which("node")
+    if not candidate:
+        return None
+    try:
+        result = subprocess.run([candidate, "--version"], capture_output=True, text=True, timeout=10)
+    except OSError:
+        return None
+    return candidate if result.returncode == 0 else None
+
+
+WORKING_NODE = find_working_node()
+
+
+@unittest.skipUnless(WORKING_NODE, "node is required to execute the release-commit script with mocked APIs")
+class ReleaseCommitScriptExecutionTests(unittest.TestCase):
+    def script(self) -> str:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+            return extract_script_block(prod_yml, "Compare the tag's commit against ci.yml's latest success on main")
+
+    def run_harness(self, mock_env: dict[str, str]) -> dict:
+        indented = "\n".join("  " + line if line else line for line in self.script().splitlines())
+        harness = NODE_HARNESS_TEMPLATE.replace("__SCRIPT__", indented)
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False, encoding="utf-8") as handle:
+            handle.write(harness)
+            harness_path = handle.name
+        try:
+            env = dict(os.environ)
+            env.update(mock_env)
+            result = subprocess.run(
+                [WORKING_NODE, harness_path], env=env, capture_output=True, text=True, timeout=30
+            )
+            self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+            return json.loads(result.stdout.strip().splitlines()[-1])
+        finally:
+            os.unlink(harness_path)
+
+    def test_lightweight_tag_matching_the_latest_green_run_succeeds(self) -> None:
+        outcome = self.run_harness(
+            {"MOCK_TAG_TYPE": "commit", "MOCK_TAG_SHA": "abc123", "MOCK_LATEST_SHA": "abc123"}
+        )
+        self.assertIsNone(outcome["failed"])
+
+    def test_lightweight_tag_mismatching_the_latest_green_run_fails(self) -> None:
+        outcome = self.run_harness(
+            {"MOCK_TAG_TYPE": "commit", "MOCK_TAG_SHA": "abc123", "MOCK_LATEST_SHA": "def456"}
+        )
+        self.assertIn("abc123", outcome["failed"])
+        self.assertIn("def456", outcome["failed"])
+
+    def test_annotated_tag_is_dereferenced_before_comparison(self) -> None:
+        outcome = self.run_harness(
+            {
+                "MOCK_TAG_TYPE": "tag",
+                "MOCK_TAG_SHA": "tag-object-sha",
+                "MOCK_DEREF_SHA": "abc123",
+                "MOCK_LATEST_SHA": "abc123",
+            }
+        )
+        self.assertIsNone(outcome["failed"])
+
+    def test_annotated_tag_mismatching_the_dereferenced_commit_fails(self) -> None:
+        outcome = self.run_harness(
+            {
+                "MOCK_TAG_TYPE": "tag",
+                "MOCK_TAG_SHA": "tag-object-sha",
+                "MOCK_DEREF_SHA": "abc123",
+                "MOCK_LATEST_SHA": "def456",
+            }
+        )
+        self.assertIn("abc123", outcome["failed"])
+        self.assertNotIn("tag-object-sha", outcome["failed"])
+
+    def test_no_successful_ci_run_fails(self) -> None:
+        outcome = self.run_harness({"MOCK_TAG_TYPE": "commit", "MOCK_TAG_SHA": "abc123", "MOCK_LATEST_SHA": ""})
+        self.assertEqual("no successful ci.yml run found on main", outcome["failed"])
 
 
 class ErrorsAndDomainDesignTests(unittest.TestCase):
