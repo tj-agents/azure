@@ -406,7 +406,9 @@ def validate_sticky(
     if host != "app-service":
         errors.append(f"{prefix}.sticky: only valid on an App Service host")
         return errors
-    effective_keys = set(profile_settings or {}) | set(workload_settings or {})
+    effective_keys = set(profile_settings) if isinstance(profile_settings, dict) else set()
+    if isinstance(workload_settings, dict):
+        effective_keys.update(workload_settings)
     for name in sticky:
         if name not in effective_keys:
             errors.append(f"{prefix}.sticky: {name!r} is not a key of this workload's effective settings")
