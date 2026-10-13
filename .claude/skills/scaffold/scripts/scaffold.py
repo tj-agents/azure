@@ -4,8 +4,10 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
+import stat
 import sys
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
@@ -2256,30 +2258,101 @@ def plan(
     return values, layers, files, metadata
 
 
+def check_output_path(path: Path) -> None:
+    absolute = Path(os.path.abspath(path))
+    for entry in [*reversed(absolute.parents), absolute]:
+        try:
+            info = entry.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise ScaffoldError(f"redirected output path: {entry}")
+        if entry != absolute and not stat.S_ISDIR(info.st_mode):
+            raise ScaffoldError(f"output ancestor is not a directory: {entry}")
+
+
+def output_conflicts(project: Path, outputs: dict[str, str]) -> list[Path]:
+    check_output_path(project)
+    conflicts = []
+    for relative in sorted(outputs):
+        target = project / relative
+        check_output_path(target)
+        try:
+            target.lstat()
+        except FileNotFoundError:
+            continue
+        conflicts.append(target)
+    return conflicts
+
+
+def created_identity(info: os.stat_result) -> tuple[int, int] | None:
+    if info.st_ino == 0:
+        return None
+    return info.st_dev, info.st_ino
+
+
+def remove_created_path(path: Path, identity: tuple[int, int] | None, directory: bool = False) -> None:
+    check_output_path(path)
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if identity is None or created_identity(info) != identity:
+        raise ScaffoldError(f"ownership changed or could not be proved: {path}")
+    if directory:
+        path.rmdir()
+    else:
+        path.unlink()
+
+
 def write_project(project: Path, files: dict[str, str], metadata: dict) -> None:
     outputs = dict(files)
     outputs[".scaffold.azure.json"] = json.dumps(metadata, indent=2) + "\n"
-    created_dirs: list[Path] = []
-    written: list[Path] = []
+    conflicts = output_conflicts(project, outputs)
+    if conflicts:
+        raise ScaffoldError("already exists: " + ", ".join(map(str, conflicts)))
+    created_dirs: list[tuple[Path, tuple[int, int] | None]] = []
+    written: list[tuple[Path, tuple[int, int] | None]] = []
     path = project
     try:
         for relative, content in outputs.items():
             path = project / relative
+            check_output_path(path)
             for directory in reversed(path.parents):
-                if not directory.exists():
-                    directory.mkdir()
-                    created_dirs.append(directory)
-            path.write_bytes(content.encode("utf-8"))
-            written.append(path)
-    except OSError as error:
-        for done in reversed(written):
-            done.unlink(missing_ok=True)
-        for directory in reversed(created_dirs):
+                try:
+                    info = directory.lstat()
+                except FileNotFoundError:
+                    try:
+                        directory.mkdir()
+                    except FileExistsError:
+                        check_output_path(directory)
+                        if not directory.is_dir():
+                            raise ScaffoldError(f"output ancestor is not a directory: {directory}")
+                    else:
+                        created_dirs.append((directory, None))
+                        created_dirs[-1] = directory, created_identity(directory.lstat())
+                else:
+                    if not stat.S_ISDIR(info.st_mode):
+                        raise ScaffoldError(f"output ancestor is not a directory: {directory}")
+            check_output_path(path)
+            with path.open("xb") as handle:
+                written.append((path, None))
+                written[-1] = path, created_identity(os.fstat(handle.fileno()))
+                handle.write(content.encode("utf-8"))
+    except Exception as error:
+        retained: list[Path] = []
+        for done, identity in reversed(written):
             try:
-                directory.rmdir()
-            except OSError:
-                pass
-        raise ScaffoldError(f"could not write {path} ({error}); removed everything this run wrote") from error
+                remove_created_path(done, identity)
+            except (OSError, ScaffoldError):
+                retained.append(done)
+        for directory, identity in reversed(created_dirs):
+            try:
+                remove_created_path(directory, identity, directory=True)
+            except (OSError, ScaffoldError):
+                retained.append(directory)
+        detail = f"; retained paths: {', '.join(map(str, retained))}" if retained else ""
+        raise ScaffoldError(f"could not write {path} ({error}); rolled back newly created outputs{detail}") from error
 
 
 def resolve_profile_path(into: Path, profile_arg: Path | None) -> Path:
@@ -2293,6 +2366,11 @@ def cmd_new(args: argparse.Namespace, input_func=input) -> int:
     project = args.into
     if not project.is_dir():
         print(f"error: --into directory does not exist: {project}", file=sys.stderr)
+        return 1
+    try:
+        check_output_path(project / "infra" / "app.json")
+    except (OSError, ScaffoldError) as error:
+        print(f"error: {error}", file=sys.stderr)
         return 1
 
     try:
@@ -2335,32 +2413,25 @@ def cmd_new(args: argparse.Namespace, input_func=input) -> int:
         return 1
 
     default_profile_path = project / "infra" / "app.json"
-    copied_profile_text = None
-    if profile_path.resolve() != default_profile_path.resolve():
-        copied_profile_text = profile_path.read_text(encoding="utf-8").replace("\r\n", "\n")
-        files = dict(files)
-        files["infra/app.json"] = copied_profile_text
-
-    profile_bytes = (copied_profile_text or profile_path.read_text(encoding="utf-8").replace("\r\n", "\n")).encode(
-        "utf-8"
-    )
-    metadata = dict(metadata)
-    metadata["profile"] = "infra/app.json"
-    metadata["profile_sha256"] = hashlib.sha256(profile_bytes).hexdigest()
-
-    conflicts: list[str] = []
-    for relative in sorted(files):
-        target = project / relative
-        if not target.exists():
-            continue
-        if relative == "infra/app.json" and target.read_text(encoding="utf-8").replace("\r\n", "\n") == files[relative]:
-            continue
-        conflicts.append(relative)
-    if (project / ".scaffold.azure.json").exists():
-        conflicts.append(".scaffold.azure.json")
+    try:
+        check_output_path(default_profile_path)
+        profile_text = profile_path.read_text(encoding="utf-8").replace("\r\n", "\n")
+        if profile_path.resolve() != default_profile_path.resolve():
+            if not default_profile_path.is_file() or default_profile_path.read_text(encoding="utf-8").replace(
+                "\r\n", "\n"
+            ) != profile_text:
+                files = dict(files)
+                files["infra/app.json"] = profile_text
+        metadata = dict(metadata)
+        metadata["profile"] = "infra/app.json"
+        metadata["profile_sha256"] = hashlib.sha256(profile_text.encode("utf-8")).hexdigest()
+        conflicts = output_conflicts(project, {**files, ".scaffold.azure.json": ""})
+    except (OSError, ScaffoldError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     if conflicts:
-        for relative in conflicts:
-            print(f"already exists: {project / relative}", file=sys.stderr)
+        for target in conflicts:
+            print(f"already exists: {target}", file=sys.stderr)
         return 1
 
     if args.dry_run:

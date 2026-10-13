@@ -373,3 +373,62 @@ it. This slice touches no workflow, so the `github-actions` contracts don't appl
 The successor owns this branch and the canonical handoff at `C:\Users\TommySeery\.claude\plans\tj-agents\HANDOFF_STANDARDS_REMAINING.md`. Tommy authorized available models for implementation and independent review on 2026-10-13, superseding the earlier model-capacity gate. Phase lane: L4, a specified local repair with regression coverage, executed by the current owner under that override.
 
 B001 is repaired by guarding effective-settings key resolution with dictionary checks. Nine sticky tests pass, including a regression with four malformed top-level/workload cases that verifies exit 2 without writes. Generated outputs are current. Full Azure/Terraform validation and independent review are next; no subscription plan/apply/az command is authorized.
+
+## Delivery checkpoint - 2026-10-13
+
+Sticky settings and B001 merged in PR 7 at 881ac901118a953b6d6ef0d5651f483e02823bf8. Reviewed head ccf7bf13b403d923b59f3004479738f4d7604761 has independent general and contract approval, including the test cleanup delta. Final-head CI passed the complete scaffold/Terraform suite on both operating systems, Actions lint and host verification. Nine focused tests, generated freshness and pinned kit conformance passed locally; local Terraform attempts failed on workstation disk exhaustion. Primary main is current and clean; the merged branch and worktree are removed. No publish workflow exists.
+
+Current goal order follows the canonical standards handoff: finish and merge dotnet snippet gate, then github-actions whole-workflow ownership, then the single Web API boilerplate scaffold. No additional native CLI sessions.
+
+
+## Item 0 delivery map - 2026-10-14
+
+The dotnet snippet gate merged as PR52 at08f9c41275105e6eac01009301cbbb9edfc8acdf.
+The shared writer merged as github-actions PR3 ata2e04b07cee412b27f8c626120973ea318f6c69f;
+independent review approved230fee5 and exact-head runs38481844145/38481844550 passed.
+Next Azure composes that pure file-map renderer and owns only cloud steps.
+
+Sequential delivery boundaries:
+1. Fix/ScaffoldFileTransaction, base0645dd5a1ce3c0df98bcde01f81b7cac83ebc04b, PR: not opened.
+   Repair B003 before the combined writer increases the transaction's output set. Include exclusive
+   output creation, preservation of an existing identical external app profile, redirect/conflict
+   rejection and rollback of only files created by this invocation. Expected under400 substantive
+   source/test lines; independent correctness/security review and Linux/Windows scaffold CI.
+   Retains current workflow generation; no writer API, action catalog or cloud behavior changes.
+2. Compose the merged github-actions writer from the updated Azure base. Replace generic workflow
+   envelopes, pins, aggregation, Dependabot and emitted lint with the external writer's pure render API.
+   Azure provides structured cloud phases and literal OIDC environments; explicit writer source input
+   precedes output creation. Include build-once archive/manifest promotion and B002 resource names from
+   Terraform outputs. This atomic provider/caller cutover is expected to remove about1000 generic lines
+   and add cloud phase/tests; reassess its measured size before review. A detached manifest-only API
+   would be unused until the same caller cutover; no dead preparatory API is planned.
+3. The single Web API boilerplate scaffold follows in dotnet; identity, published dependency mechanism,
+   transactional dispatcher, Terraform ownership and Core repairs remain later separate deliveries.
+
+Current execution phase: L4 specified transaction repair with temporary-filesystem regression tests;
+one bounded available-model writer owns source/tests. Parent owns goal, Git, acceptance, deny-list,
+independent review and delivery. No local Terraform/C# build or live Azure commands.
+Execution checkout: C:\Users\TommySeery\source\repos\tj-agents\azure\.worktrees\Fix-ScaffoldFileTransaction.
+Next action: repair and verify B003, then commit a frozen candidate for independent review.
+### B003 candidate acceptance - 2026-10-14
+
+The exclusive L4 source writer stopped all handles. Parent inspected file/profile preflight, exclusive
+creation and rollback ownership. Existing identical external profiles are omitted from outputs; bytes
+and mtime survive success, partial/final metadata failure and dry run. Conflicting or redirected outputs
+fail before writes, including an actual Windows junction. Rollback compares recorded device/inode
+identity and preserves replaced/unprovable files and directories; retained paths are reported. Portable
+path operations do not promise atomic protection from hostile substitutions between identity check
+and removal.
+
+Focused transaction suite:20 tests,5 Windows symlink-privilege skips, success; replacement file,
+replacement directory, unprovable identity and Windows junction passed. Shared artifact:
+.git/agent-workflow/runs/standards-azure-transaction-20261014/artifacts/1da2ab2770cd7a01-transaction-owned-rollback.log.
+Earlier complete lightweight suite:141 tests,15 skips (Terraform disabled), success; final ownership
+correction is covered by focused tests and will receive the complete exact-head Linux/Windows CI.
+237-file generated freshness, whitespace and pinned Kit1.2.1 conformance pass. Canonical source is
++111/-40, tests+409/-7; generated mirrors are mechanical, goal/record changes retain this delivery map.
+This is within the recorded bounded transaction slice; no cloud/workflow-provider cutover is included.
+
+Next phase: L4 independent native correctness and L2 filesystem security review over one committed
+frozen candidate; parent alone judges findings. Then exact-head remote scaffold/Terraform, Actions lint
+and host gates, authorized merge/cleanup, and the Azure provider composition/B002 slice.
