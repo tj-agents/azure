@@ -56,16 +56,18 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
      "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
      "build": {"image": "<command that builds and pushes $IMAGE>"},
      "messaging": {"publishes": ["orders"]}},
-    {"id": "worker", "kind": "background", "build": {"image": "..."}, "messaging": {"consumes": ["orders"]}},
+    {"id": "worker", "kind": "background", "build": {"image": "..."},
+     "messaging": {"consumes": [{"topic": "orders", "types": ["order-placed"]}]}},
     {"id": "functions", "kind": "functions", "runtime": {"name": "dotnet-isolated", "version": "10.0"},
      "build": {"package": "<command that writes a zip to $PACKAGE>"}}
   ],
-  "database": {"engine": "postgres", "migration": {"build": {"image": "..."}, "command": ["..."]}},
+  "database": {"engine": "postgres", "schemas": ["public"], "migration": {"build": {"image": "..."}, "command": ["..."]}},
   "settings": {
     "ConnectionStrings__Postgres": "Host={postgres.host};Database={postgres.database};Username={postgres.user};Ssl Mode=Require",
     "APPLICATIONINSIGHTS_CONNECTION_STRING": "{monitor.connection_string}",
     "AZURE_CLIENT_ID": "{identity.client_id}"
-  }
+  },
+  "verify": ["dotnet restore", "dotnet build", "dotnet test"]
 }
 ```
 
@@ -83,16 +85,25 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
     into the YAML, but rejects the GitHub Actions expression syntax outright regardless.
   - `settings`: optional, same shape and validation as the top-level `settings` below, merged over it for
     that workload — the workload's value wins on a key clash.
-  - `messaging`: optional, `{"publishes": [topic...], "consumes": [topic...]}`. Every topic named must be in
-    the `topics` option, and either list requires `messaging=service-bus`; either exits 2 otherwise. Each
-    `publishes` topic grants that workload `Azure Service Bus Data Sender` at topic scope. Each `consumes`
-    topic creates a subscription `<id>-<topic>` in the instance root — `max_delivery_count = 10`, lock
-    `PT1M`, dead-lettering on expiry and filter errors, a `handled-types` SQL rule — and grants that workload
-    `Azure Service Bus Data Receiver` at that subscription's scope. A workload gets no role on a topic or
-    subscription it doesn't name.
-- `database`: optional, `engine` must be `postgres`. An optional `migration` holds `build.image` (a shell
-  command) and `command` (a list of strings) for the migration job. The migration job's env uses only the
-  top-level `settings`, never a workload's.
+  - `messaging`: optional, `{"publishes": [topic...], "consumes": [{"topic": ..., "types": [...]}...]}`.
+    Every `publishes` topic, and every `consumes` entry's `topic`, must be in the `topics` option; either
+    requires `messaging=service-bus`; either exits 2 otherwise. A `consumes` entry's `types` is a required,
+    non-empty, duplicate-free list matching `^[A-Za-z0-9._-]{1,128}$`, naming the `type` application
+    property values that subscription accepts; it exits 2 otherwise. Each `publishes` topic grants that
+    workload `Azure Service Bus Data Sender` at topic scope. Each `consumes` entry creates a subscription
+    `<id>-<topic>` in the instance root — `max_delivery_count = 10`, lock `PT1M`, dead-lettering on expiry
+    and filter errors, a `handled-types` SQL rule filtering on that entry's own `types` — and grants that
+    workload `Azure Service Bus Data Receiver` at that subscription's scope. The deploy workflow removes
+    each subscription's `$Default` rule after applying, so only `handled-types` is left filtering. A
+    workload gets no role on a topic or subscription it doesn't name.
+- `database`: optional, `engine` must be `postgres`. An optional `schemas` list (default `["public"]`,
+  identifiers matching `^[a-z_][a-z0-9_]{0,62}$`, unique) names every schema the migration job prepares:
+  it creates each non-`public` schema (`public` always exists) owned by the migrator, then grants every
+  workload identity `USAGE` on the schema plus `SELECT, INSERT, UPDATE, DELETE` on its tables and
+  `USAGE, SELECT` on its sequences — both for objects that already exist and, through
+  `ALTER DEFAULT PRIVILEGES`, for ones a later migration creates. An optional `migration` holds
+  `build.image` (a shell command) and `command` (a list of strings) for the migration job. The migration
+  job's env uses only the top-level `settings`, never a workload's.
 - `settings`: an object mapping an env name (`^[A-Za-z_][A-Za-z0-9_]*$`) to a string. Literal text around
   `{token}` placeholders is kept; `{{` and `}}` escape literal braces. Tokens:
   - `postgres.host`, `postgres.database`, `postgres.user` (requires `database`; `postgres.user` resolves
@@ -103,6 +114,10 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
   - `monitor.connection_string`;
   - `identity.client_id` (the consuming workload's own identity).
   - An unknown token, or a token used without its required option, exits 2.
+- `verify`: optional, a list of non-empty shell commands (the app stack's restore, build and test, for
+  example), validated and run the same way as `build.*` commands — no `${{` or `}}`, passed through a step
+  `env:` and run with `bash -c`. When present, `pr.yml` and `ci.yml` run them in a sentence-named `verify`
+  job before any Azure job.
 - Unknown top-level keys and unknown workload keys exit 2.
 
 ## Generated Terraform
@@ -125,19 +140,40 @@ options plus the profile-derived flags (`has_database`, `has_migration`, `has_fu
 `http_container_apps`, `http_app_service`, `functions_flex`, `functions_container`, `container_apps_used`),
 and `files/<repo-relative path>.in` holds its fragment of each output file, rendered with
 `__PLACEHOLDER__` substitution and `@if`/`@only-if` flag lines. `templates/` holds the files every project
-gets. `workloads.tf`, `migration.tf` and `.github/workflows/infra.yml` are generated directly from the
-profile in Python, not from `.in` fragments, because their shape depends on the workload list itself.
+gets, including `infra/.gitignore` and `infra/env/{dev,prod}.tfvars`. `workloads.tf`, `migration.tf` and
+every `.github` file are generated directly from the profile in Python, not from `.in` fragments, because
+their shape depends on the workload list itself.
 
-## The deploy workflow (`.github/workflows/infra.yml`, when `workflows`)
+## The GitHub Actions workflows (`.github/`, when `workflows`)
 
-`validate` and `plan` are unchanged from a plain Terraform gate. `deploy` (push to `main`): applies
-foundation, then for each workload runs its `build.image` or `build.package` command (and the database's
-migration build, under key `migration`), setting `REGISTRY` (the registry login server), `REPOSITORY`
-(`<name>-<id>`, or `<name>-migration`), `TAG` (the commit sha) and `IMAGE=$REGISTRY/$REPOSITORY:$TAG` for
-an image build, or `PACKAGE` for a package build. It then applies the migration job and its identity,
-admin and database, runs the job and waits for it, applies the full instance plan with the built images,
-deploys each package (`az functionapp deploy` for Flex Consumption; a staging-slot deploy, readiness wait
-and swap for App Service), and waits for each Container App's revision to become ready.
+Every generated workflow follows `github-actions`'s structure, style, security, testing and build
+contracts: a top-level `permissions: contents: read` that jobs re-declare in full, `id-token: write` only
+on a job that signs in, `persist-credentials: false` on every checkout, every remote `uses:` pinned to a
+commit SHA with a `# vX.Y.Z` comment, and a `ci-complete` aggregator in `pr.yml` and `ci.yml`.
+
+- `pr.yml`: an optional sentence-named `verify` job (when the profile has one), `validate` (fmt, init
+  `-backend=false`, validate, matrixed over both roots), `plan` (a real `terraform plan` against the `dev`
+  environment's state, uploaded as an artifact), then `compute-preview-id` and `deploy-preview` — gated on
+  `vars.AZURE_FOUNDATION_READY` and `vars.AZURE_PREVIEW_ENABLED` both being `'true'` — which calls
+  `deploy-environment.yml` with an ephemeral id derived from the PR number.
+- `ci.yml`: the optional `verify` job, `validate`, then `deploy-dev` calling `deploy-environment.yml` for
+  the shared `dev` environment.
+- `prod.yml`: on a `v*` tag push, `validate` then `deploy-prod` calling `deploy-environment.yml` for the
+  protected `prod` environment, using `prod.tfvars`.
+- `pr-closed.yml`: on PR close, recomputes the same ephemeral id and calls `destroy-preview.yml`.
+- `deploy-environment.yml` (`workflow_call`; inputs `environment`, `tfvars-file`, `ephemeral-id`): signs in
+  and initializes Terraform for `foundation` through the `terraform-login-init` composite action; applies
+  foundation unless `ephemeral-id` is set (a preview reuses `dev`'s foundation); reads its outputs; builds
+  every workload (and the migration image) through the `build-workload` composite action, one step per
+  workload; initializes the `instance` root at key `<name>/instance.tfstate`, or
+  `<name>/instance.<ephemeral-id>.tfstate` when ephemeral; runs the migration job if the profile has one;
+  applies the instance with `-var ephemeral_id=$EPHEMERAL_ID` (always passed, empty by default); and
+  deploys each package or waits for each Container App to become healthy.
+- `destroy-preview.yml` (`workflow_call`; inputs `ephemeral-id`, `tfvars-file`): initializes the `instance`
+  root at that PR's ephemeral key and runs `terraform destroy`.
+- `ephemeral_id` is `pr<N>`: the instance variable allows up to 6 lowercase alphanumeric characters, so a
+  PR number longer than 4 digits is truncated to its last 4 digits — documented where it's computed.
+- `.github/dependabot.yml` keeps the `github-actions` ecosystem's pins current, weekly.
 
 ## Validation and publication
 

@@ -1,0 +1,9 @@
+output "service_bus_default_rule_subscriptions" {
+  value = jsonencode([
+    for key, entry in local.consume_entries : {
+      namespace    = data.azurerm_servicebus_namespace.main.name
+      topic        = entry.topic
+      subscription = azurerm_servicebus_subscription.main[key].name
+    }
+  ])
+}

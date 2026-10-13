@@ -20,11 +20,21 @@ scaffold = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(scaffold)
 
 EMPTY_WORKLOADS_FILES = {
-    ".github/workflows/infra.yml",
+    ".github/actions/build-workload/action.yml",
+    ".github/actions/terraform-login-init/action.yml",
+    ".github/dependabot.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/deploy-environment.yml",
+    ".github/workflows/destroy-preview.yml",
+    ".github/workflows/pr-closed.yml",
+    ".github/workflows/pr.yml",
+    ".github/workflows/prod.yml",
     ".scaffold.azure.json",
+    "infra/.gitignore",
     "infra/README.md",
     "infra/app.json",
     "infra/env/dev.tfvars",
+    "infra/env/prod.tfvars",
     "infra/foundation/backend.tf",
     "infra/foundation/budget.tf",
     "infra/foundation/locals.tf",
@@ -685,9 +695,11 @@ class IntoConflictTests(unittest.TestCase):
 
             shutil.rmtree(root / "infra" / "foundation")
             shutil.rmtree(root / "infra" / "instance")
+            shutil.rmtree(root / ".github")
             (root / "infra/README.md").unlink()
             (root / "infra/env/dev.tfvars").unlink()
-            (root / ".github/workflows/infra.yml").unlink()
+            (root / "infra/env/prod.tfvars").unlink()
+            (root / "infra/.gitignore").unlink()
             (root / ".scaffold.azure.json").unlink()
 
             code, _, err = run(["new", "--into", str(root), "--profile", str(external), "--no-input"])
@@ -917,6 +929,348 @@ class BudgetTests(unittest.TestCase):
             self.assertIn("budget_start_date", dev_tfvars)
 
 
+SHA_REF_PATTERN = re.compile(r"uses:\s*([^\s@]+)@([0-9a-f]{40})\s*#\s*(v[0-9][\w.()\- ]*)")
+
+
+class SchemasTests(unittest.TestCase):
+    def test_default_schema_is_public_only(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [{"id": "api", "kind": "background", "build": {"image": "x"}}],
+                "database": {"engine": "postgres", "migration": {"build": {"image": "x"}, "command": ["x"]}},
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
+            self.assertIn('GRANT USAGE ON SCHEMA "public"', migration_tf)
+            self.assertNotIn("CREATE SCHEMA", migration_tf)
+
+    def test_two_schemas_render_grants_for_both(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [{"id": "api", "kind": "background", "build": {"image": "x"}}],
+                "database": {
+                    "engine": "postgres",
+                    "schemas": ["public", "sandbox"],
+                    "migration": {"build": {"image": "x"}, "command": ["x"]},
+                },
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
+            self.assertIn(
+                'CREATE SCHEMA IF NOT EXISTS "sandbox" AUTHORIZATION "${azurerm_user_assigned_identity.migrator.name}"',
+                migration_tf,
+            )
+            self.assertNotIn('CREATE SCHEMA IF NOT EXISTS "public"', migration_tf)
+            for schema in ("public", "sandbox"):
+                self.assertIn(f'GRANT USAGE ON SCHEMA "{schema}"', migration_tf)
+                self.assertIn(f'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA "{schema}"', migration_tf)
+                self.assertIn(f'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA "{schema}"', migration_tf)
+                self.assertIn(f'IN SCHEMA "{schema}" GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES', migration_tf)
+                self.assertIn(f'IN SCHEMA "{schema}" GRANT USAGE, SELECT ON SEQUENCES', migration_tf)
+
+    def test_invalid_schema_name_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "database": {"engine": "postgres", "schemas": ["Not-Valid"]},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("profile.database.schemas", err)
+
+    def test_duplicate_schema_name_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "database": {"engine": "postgres", "schemas": ["public", "public"]},
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("duplicate schema", err)
+
+
+class ServiceBusConsumeTests(unittest.TestCase):
+    def consume_profile(self, consumes: object) -> dict:
+        return {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "worker",
+                    "kind": "background",
+                    "build": {"image": "x"},
+                    "messaging": {"consumes": consumes},
+                }
+            ],
+        }
+
+    def test_empty_types_list_exits_2(self) -> None:
+        profile = self.consume_profile([{"topic": "orders", "types": []}])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(2, code)
+            self.assertIn("types", err)
+
+    def test_invalid_type_exits_2(self) -> None:
+        profile = self.consume_profile([{"topic": "orders", "types": ["not valid!"]}])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(2, code)
+            self.assertIn("types", err)
+
+    def test_duplicate_type_exits_2(self) -> None:
+        profile = self.consume_profile([{"topic": "orders", "types": ["created", "created"]}])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(2, code)
+            self.assertIn("duplicate type", err)
+
+    def test_per_subscription_filter_renders_from_its_own_types(self) -> None:
+        profile = self.consume_profile([{"topic": "orders", "types": ["created", "updated"]}])
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(0, code, err)
+            service_bus_tf = (root / "infra/instance/service-bus.tf").read_text(encoding="utf-8")
+            self.assertIn(
+                'sql_filter      = "[type] IN (${join(", ", [for type in each.value.types : format("\'%s\'", type)])})"',
+                service_bus_tf,
+            )
+            self.assertNotIn("service_bus_handled_types", service_bus_tf)
+            workloads_tf = (root / "infra/instance/workloads.tf").read_text(encoding="utf-8")
+            self.assertIn('types = ["created", "updated"]', workloads_tf)
+
+    def test_default_rule_removal_step_present_only_with_consumes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = self.consume_profile([{"topic": "orders", "types": ["created"]}])
+            write_profile(root, profile)
+            code, _, err = run(
+                ["new", "--into", str(root), "--set", "messaging=service-bus", "--set", "topics=orders", "--no-input"]
+            )
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertIn("Remove the default Service Bus subscription rule", deploy_environment)
+            self.assertIn("service_bus_default_rule_subscriptions", deploy_environment)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertNotIn("Remove the default Service Bus subscription rule", deploy_environment)
+
+
+class VerifyFieldTests(unittest.TestCase):
+    def test_verify_commands_rejects_actions_expression_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "verify": ["echo ${{ secrets.FOO }}"],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("must not contain", err)
+
+    def test_verify_rejects_empty_string_exits_2(self) -> None:
+        profile = {"schema_version": 1, "name": "demo", "workloads": [], "verify": [""]}
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("profile.verify", err)
+
+    def test_verify_job_runs_before_azure_jobs_in_pr_and_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            profile = {
+                "schema_version": 1,
+                "name": "demo",
+                "workloads": [],
+                "verify": ["dotnet restore", "dotnet build"],
+            }
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+            ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+            for text in (pr_yml, ci_yml):
+                self.assertIn("Verify the app stack", text)
+                self.assertIn("dotnet restore", text)
+                self.assertIn("dotnet build", text)
+                self.assertLess(text.index("verify:"), text.index("validate:"))
+
+    def test_no_verify_job_when_profile_omits_it(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+            self.assertNotIn("Verify the app stack", pr_yml)
+
+
+class WorkflowsGateTests(unittest.TestCase):
+    def test_workflows_false_writes_no_github_files_but_keeps_gitignore_and_prod_tfvars(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--set", "workflows=false", "--no-input"])
+            self.assertEqual(0, code, err)
+            written = files(root)
+            self.assertFalse(any(path.startswith(".github/") for path in written))
+            self.assertIn("infra/.gitignore", written)
+            self.assertIn("infra/env/prod.tfvars", written)
+
+
+class GeneratedWorkflowConformanceTests(unittest.TestCase):
+    def test_gitignore_excludes_state_but_keeps_the_lock_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            gitignore = (root / "infra/.gitignore").read_text(encoding="utf-8")
+            for pattern in (
+                ".terraform/",
+                "*.tfstate",
+                "*.tfstate.*",
+                "*.tfplan",
+                "tfplan",
+                "crash.log",
+                "crash.*.log",
+                "override.tf",
+                "override.tf.json",
+                "*_override.tf",
+                "*_override.tf.json",
+            ):
+                self.assertIn(pattern, gitignore.splitlines())
+            self.assertNotIn(".terraform.lock.hcl", gitignore)
+
+    def test_every_remote_uses_is_pinned_to_a_full_sha_with_a_version_comment(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, SANDBOX_PROFILE)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            found = False
+            for path in (root / ".github").rglob("*.yml"):
+                for line in path.read_text(encoding="utf-8").splitlines():
+                    stripped = line.strip()
+                    if not stripped.startswith("uses:") or stripped.startswith("uses: ./"):
+                        continue
+                    self.assertRegex(stripped, SHA_REF_PATTERN, f"{path}: {stripped}")
+                    found = True
+            self.assertTrue(found)
+
+    def test_every_checkout_persists_no_credentials(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, SANDBOX_PROFILE)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            checked = 0
+            for path in (root / ".github").rglob("*.yml"):
+                text = path.read_text(encoding="utf-8")
+                for match in re.finditer(r"uses: actions/checkout@[0-9a-f]{40}.*\n\s*with:\n\s*persist-credentials: false", text):
+                    checked += 1
+            self.assertGreater(checked, 0)
+
+    def test_top_level_permissions_are_contents_read(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, SANDBOX_PROFILE)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            checked = 0
+            for path in (root / ".github/workflows").glob("*.yml"):
+                text = path.read_text(encoding="utf-8")
+                self.assertIn("permissions:\n  contents: read", text, path)
+                checked += 1
+            self.assertEqual(6, checked)
+
+    def test_ci_complete_aggregator_in_pr_and_ci(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, SANDBOX_PROFILE)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            for name in ("pr.yml", "ci.yml"):
+                text = (root / ".github/workflows" / name).read_text(encoding="utf-8")
+                self.assertIn("ci-complete:", text)
+                self.assertIn("if: always()", text)
+
+    def test_ephemeral_id_is_truncated_to_six_characters(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+            self.assertIn('digits="${digits: -4}"', pr_yml)
+            self.assertIn('echo "ephemeral-id=pr${digits}"', pr_yml)
+
+    def test_preview_state_key_uses_pr_instance_suffix(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+            self.assertIn("demo/instance.{0}.tfstate", deploy_environment)
+            destroy_preview = (root / ".github/workflows/destroy-preview.yml").read_text(encoding="utf-8")
+            self.assertIn("demo/instance.${{ inputs.ephemeral-id }}.tfstate", destroy_preview)
+
+    def test_dependabot_configures_github_actions_ecosystem_weekly(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(0, code, err)
+            dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
+            self.assertIn("package-ecosystem: github-actions", dependabot)
+            self.assertIn("interval: weekly", dependabot)
+
+
 def generate(root: Path, profile: dict, *sets: str) -> Path:
     write_profile(root, profile)
     args = ["new", "--into", str(root), "--no-input"]
@@ -999,7 +1353,10 @@ class TerraformGateTests(unittest.TestCase):
                         "probes": {"liveness": "/health/live", "readiness": "/health/ready"},
                         "build": {"image": "echo build-api"},
                         "settings": {"ServiceBus__Namespace": "{servicebus.namespace}"},
-                        "messaging": {"publishes": ["orders"], "consumes": ["orders"]},
+                        "messaging": {
+                            "publishes": ["orders"],
+                            "consumes": [{"topic": "orders", "types": ["order-placed"]}],
+                        },
                     }
                 ],
             }
