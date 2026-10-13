@@ -20,14 +20,14 @@ The rule each item follows is in brackets.
 - **Files** [`github-actions:structure`]: a deployed service gets
   - `.github/workflows/pr.yml`: verify, then plan, then an optional preview instance with
     `ephemeral_id = pr<N>`;
-  - `ci.yml`: push to `main`, verify, then deploy the shared non-production environment `dev`;
+  - `ci.yml`: push to `main`, verify, then deploy the shared non-production environment `ci`;
   - `prod.yml`: tag-triggered production deploy through a protected `prod` environment;
   - `pr-closed.yml`: preview teardown, a `terraform destroy` of the `pr<N>` instance;
   - reusable workflows `deploy-environment.yml` and `destroy-preview.yml` (`on: workflow_call`), and
     composite actions under `.github/actions/<kebab-name>/action.yml` for steps repeated across jobs
     (Azure sign-in plus Terraform init, the image build loop);
   - `.github/dependabot.yml` for the `github-actions` ecosystem;
-  - `infra/env/prod.tfvars` alongside `dev.tfvars`.
+  - `infra/env/prod.tfvars` alongside `ci.tfvars`.
 - **App verification**: the profile gains an optional top-level `verify` (a list of shell commands, for
   example the app stack's restore, build and test). pr.yml and ci.yml run them in a sentence-named job
   before any Azure job. With azure owning `ci.yml`, an app stack with `cloud=azure` doesn't emit its own
@@ -66,6 +66,25 @@ The rule each item follows is in brackets.
   - each subscription renders `[type] IN (...)`, and the global variable is removed;
   - the deploy workflow deletes `$Default` per subscription after apply, so the filter takes effect.
 
+- **Concurrency and cancellation** [`github-actions:errors`]: `pr.yml` keeps the verification group
+  `${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}` (`cancel-in-progress:
+  true`); `ci.yml`, `prod.yml` and the preview apply/`pr-closed.yml` pair use fixed groups per environment
+  (`ci`, `prod`, `preview-<instance id>`) with `cancel-in-progress: false`; a `break-preview-lock` job,
+  `if: cancelled()`, breaks the preview's leaked blob lease over OIDC; every job sets `timeout-minutes`
+  (except a job that only `uses:` a reusable workflow, which GitHub does not allow it on — the timeout lives
+  in that workflow's own job instead); a job that depends on a deploy uses
+  `if: ${{ !cancelled() && needs.<job>.result == 'success' }}`; failures annotate with `::error file=…::`.
+- **Environments and preview opt-in** [`github-actions:domain-design`]: one GitHub environment per deploy
+  target — `ci`, `preview`, `prod` — each with its own vars, secrets and protection rules (`preview` and
+  `prod` should require review); the old `dev` name is retired everywhere it named that target, including
+  `env/dev.tfvars` → `env/ci.tfvars`. A pull request's preview is opt-in through a `deploy-preview` label
+  (triage access is the trust gate a fork can't bypass), triggering `pr.yml` on `opened`, `synchronize`,
+  `reopened` and `labeled`; `pr-closed.yml` destroys the preview only if it carried the label. `plan`, the
+  preview apply, the lock release and the destroy additionally check
+  `github.event.pull_request.head.repo.full_name == github.repository` as defense in depth. The ephemeral id
+  stays the full `pr<N>` — truncating it let two PRs 10000 apart collide — so an id over the 6-character
+  budget fails the job loudly instead.
+
 ## Slices
 
 1. azure (this branch, PR to tj-agents/azure): everything above, with tests and actionlint/zizmor in CI.
@@ -93,6 +112,21 @@ The rule each item follows is in brackets.
   job. 83 unittests and the 5-case Terraform gate pass. actionlint 1.7.12 and zizmor 1.30.1 are clean on
   every preset; zizmor's `self-repository` audit is ignored for generated files only, because actionlint
   rejects the `$/` syntax it asks for. This repository's own `terraform.yml` is pinned and linted too.
+
+- 2026-10-13: PR #5 (`tj-agents/azure#5`) review fixes: pinned/linted `terraform.yml` (`4a93d4b`) and made
+  the retry loops shellcheck-clean plus an App Service lint preset (`2c883a5`), both already pushed. Added
+  the `errors` and `domain-design` contracts to the Design above and closed every item the review raised:
+  verification/fixed/shared concurrency groups, a `break-preview-lock` job, `timeout-minutes` on every job
+  that can carry it, `!cancelled() && needs.<job>.result == 'success'` on deploy-dependent jobs,
+  `::error file=…::` annotations, the `dev` → `ci`/`preview`/`prod` environment rename (including
+  `env/dev.tfvars` → `env/ci.tfvars`), the `deploy-preview` label gate replacing `AZURE_PREVIEW_ENABLED`
+  with fork-safety checks on every signing-in PR job, an untruncated `pr<N>` ephemeral id that fails loudly
+  over budget, `hcl_list` escaping every item through `escape_hcl_string`, and dropping the unnecessary
+  checkout from the ephemeral-id job. Since `preview` is now its own GitHub environment distinct from `ci`,
+  the `ci` foundation's deploy identity also gets a federated credential for the `environment:preview` OIDC
+  subject (only on the `ci` foundation, `count = var.env == "ci" ? 1 : 0`), or a preview deploy could never
+  sign in. 98 unittests and the 5-case Terraform gate pass; actionlint (with shellcheck) and zizmor are
+  clean on all four lint presets and on `terraform.yml`.
 
 ## Next Steps
 
