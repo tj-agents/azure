@@ -1436,11 +1436,13 @@ def run_script_with_stubs(script: str, stubs: dict[str, str], env_extra: dict[st
             write_stub(bin_dir, stub_name, stub_body)
         posix_bin_dir = to_posix_path(bin_dir)
         env = dict(os.environ)
-        env["PATH"] = f"{posix_bin_dir}:{env.get('PATH', '')}"
         env["RESOURCE_GROUP"] = "stub-rg"
         env["RUNNER_TEMP"] = posix_bin_dir
         env.update(env_extra)
-        return subprocess.run([WORKING_BASH, "-c", script], env=env, capture_output=True, text=True, timeout=300)
+        stubbed_script = f'export PATH="{posix_bin_dir}:/usr/bin:/bin:$PATH"\n' + script
+        return subprocess.run(
+            [WORKING_BASH, "-c", stubbed_script], env=env, capture_output=True, text=True, timeout=120
+        )
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
 
