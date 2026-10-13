@@ -699,16 +699,17 @@ class IntoConflictTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = new_project(temporary)
             write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
-            original = Path.write_bytes
+            original = Path.open
             calls = {"count": 0}
 
-            def failing_write(path: Path, data: bytes) -> int:
-                calls["count"] += 1
-                if calls["count"] == 5:
-                    raise OSError("disk full")
-                return original(path, data)
+            def failing_open(path: Path, mode="r", *args, **kwargs):
+                if mode == "xb":
+                    calls["count"] += 1
+                    if calls["count"] == 5:
+                        raise OSError("disk full")
+                return original(path, mode, *args, **kwargs)
 
-            with unittest.mock.patch.object(Path, "write_bytes", failing_write):
+            with unittest.mock.patch.object(Path, "open", failing_open):
                 code, _, err = run(["new", "--into", str(root), "--no-input"])
             self.assertEqual(1, code)
             self.assertIn("disk full", err)
@@ -748,6 +749,407 @@ class IntoConflictTests(unittest.TestCase):
             code, _, err = run(["new", "--into", str(root), "--profile", str(external), "--no-input"])
             self.assertEqual(1, code)
             self.assertIn("app.json", err)
+
+
+class WriteTransactionTests(unittest.TestCase):
+    profile = {"schema_version": 1, "name": "demo", "workloads": []}
+
+    def scaffold(self, root: Path, external: Path | None = None, dry_run: bool = False):
+        argv = ["new", "--into", str(root), "--no-input"]
+        if external is not None:
+            argv += ["--profile", str(external)]
+        if dry_run:
+            argv += ["--dry-run"]
+        return run(argv)
+
+    def existing_profile(self, root: Path) -> tuple[Path, bytes, int]:
+        path = write_profile(root, self.profile)
+        content = (json.dumps(self.profile, indent=2) + "\r\n").encode("utf-8")
+        path.write_bytes(content)
+        os.utime(path, ns=(1_600_000_000_000_000_000, 1_600_000_000_000_000_000))
+        return path, content, path.stat().st_mtime_ns
+
+    def symlink(self, link: Path, target: Path, directory: bool = False) -> None:
+        try:
+            link.symlink_to(target, target_is_directory=directory)
+        except (OSError, NotImplementedError) as error:
+            self.skipTest(f"symlinks unavailable: {error}")
+
+    def test_identical_external_profile_preserves_bytes_and_mtime_on_success(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            path, content, modified = self.existing_profile(root)
+            external = Path(temporary) / "external.json"
+            external.write_bytes(content)
+            code, _, err = self.scaffold(root, external)
+            self.assertEqual(0, code, err)
+            self.assertEqual(content, path.read_bytes())
+            self.assertEqual(modified, path.stat().st_mtime_ns)
+
+    def test_identical_external_profile_survives_final_metadata_write_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            path, content, modified = self.existing_profile(root)
+            external = Path(temporary) / "external.json"
+            external.write_bytes(content)
+            unrelated = root / "keep.txt"
+            unrelated.write_bytes(b"caller-owned")
+            original = Path.open
+
+            @contextlib.contextmanager
+            def failing_open(target: Path, mode="r", *args, **kwargs):
+                with original(target, mode, *args, **kwargs) as handle:
+                    if mode == "xb" and target.name == ".scaffold.azure.json":
+                        proxy = unittest.mock.Mock(wraps=handle)
+
+                        def fail_write(data):
+                            handle.write(data[:3])
+                            raise OSError("metadata disk full")
+
+                        proxy.write.side_effect = fail_write
+                        yield proxy
+                    else:
+                        yield handle
+
+            with unittest.mock.patch.object(Path, "open", failing_open):
+                code, _, err = self.scaffold(root, external)
+            self.assertEqual(1, code, err)
+            self.assertIn("metadata disk full", err)
+            self.assertEqual(content, path.read_bytes())
+            self.assertEqual(modified, path.stat().st_mtime_ns)
+            self.assertEqual(content, external.read_bytes())
+            self.assertEqual(b"caller-owned", unrelated.read_bytes())
+            self.assertEqual({"infra/app.json", "keep.txt"}, files(root))
+            self.assertEqual({root / "infra"}, {entry for entry in root.iterdir() if entry.is_dir()})
+
+    def test_new_external_profile_copy_is_rolled_back_on_metadata_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            external = write_profile(Path(temporary), self.profile, "external.json")
+            content = external.read_bytes()
+            original = Path.open
+
+            def failing_open(target: Path, mode="r", *args, **kwargs):
+                if mode == "xb" and target.name == ".scaffold.azure.json":
+                    raise OSError("metadata disk full")
+                return original(target, mode, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "open", failing_open):
+                code, _, err = self.scaffold(root, external)
+            self.assertEqual(1, code, err)
+            self.assertIn("metadata disk full", err)
+            self.assertEqual(content, external.read_bytes())
+            self.assertEqual(set(), files(root))
+            self.assertEqual([root / "infra"], list(root.iterdir()))
+
+    def test_partial_write_rolls_back_the_file_that_failed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            path, content, modified = self.existing_profile(root)
+            original = Path.open
+            count = 0
+
+            @contextlib.contextmanager
+            def failing_open(target: Path, mode="r", *args, **kwargs):
+                nonlocal count
+                with original(target, mode, *args, **kwargs) as handle:
+                    if mode == "xb":
+                        count += 1
+                    if mode == "xb" and count == 5:
+                        proxy = unittest.mock.Mock(wraps=handle)
+
+                        def fail_write(data):
+                            handle.write(data[:3])
+                            raise RuntimeError("partial write failure")
+
+                        proxy.write.side_effect = fail_write
+                        yield proxy
+                    else:
+                        yield handle
+
+            with unittest.mock.patch.object(Path, "open", failing_open):
+                code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertIn("partial write failure", err)
+            self.assertEqual({"infra/app.json"}, files(root))
+            self.assertEqual(content, path.read_bytes())
+            self.assertEqual(modified, path.stat().st_mtime_ns)
+            self.assertEqual([root / "infra"], list(root.iterdir()))
+
+    def test_exclusive_create_collision_preserves_concurrent_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            original = Path.open
+            collided = []
+            count = 0
+
+            def racing_open(target: Path, mode="r", *args, **kwargs):
+                nonlocal count
+                if mode == "xb":
+                    count += 1
+                    if count == 5:
+                        with original(target, "wb") as handle:
+                            handle.write(b"concurrent owner")
+                        collided.append(target)
+                return original(target, mode, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "open", racing_open):
+                code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertEqual(1, len(collided))
+            self.assertEqual(b"concurrent owner", collided[0].read_bytes())
+            self.assertEqual({"infra/app.json", collided[0].relative_to(root).as_posix()}, files(root))
+
+    def test_rollback_preserves_replacement_of_a_created_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            original = Path.open
+            replaced = root / "infra/.gitignore"
+            moved = Path(temporary) / "original-output"
+
+            def failing_open(target: Path, mode="r", *args, **kwargs):
+                if mode == "xb" and target.name == ".scaffold.azure.json":
+                    replaced.rename(moved)
+                    with original(replaced, "wb") as handle:
+                        handle.write(b"replacement owner")
+                    raise OSError("metadata disk full")
+                return original(target, mode, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "open", failing_open):
+                code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertEqual(b"replacement owner", replaced.read_bytes())
+            self.assertIn(f"retained paths: {replaced}", err)
+            self.assertEqual({"infra/app.json", "infra/.gitignore"}, files(root))
+
+    def test_rollback_preserves_replacement_of_a_created_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            original = Path.open
+            replaced = root / ".github"
+            moved = Path(temporary) / "original-directory"
+
+            def failing_open(target: Path, mode="r", *args, **kwargs):
+                if mode == "xb" and target.name == ".scaffold.azure.json":
+                    replaced.rename(moved)
+                    replaced.mkdir()
+                    raise OSError("metadata disk full")
+                return original(target, mode, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "open", failing_open):
+                code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertTrue(replaced.is_dir())
+            self.assertEqual([], list(replaced.iterdir()))
+            self.assertIn(f"retained paths: {replaced}", err)
+            self.assertEqual({"infra/app.json"}, files(root))
+
+    def test_rollback_retains_created_files_when_identity_is_unprovable(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            original = Path.open
+
+            def failing_open(target: Path, mode="r", *args, **kwargs):
+                if mode == "xb" and target.name == ".scaffold.azure.json":
+                    raise OSError("metadata disk full")
+                return original(target, mode, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "open", failing_open), unittest.mock.patch.object(
+                scaffold, "created_identity", return_value=None
+            ):
+                code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            retained = root / "infra/.gitignore"
+            self.assertTrue(retained.is_file())
+            self.assertIn(str(retained), err)
+            self.assertIn("retained paths:", err)
+
+    def test_rollback_preserves_concurrent_unrelated_files_and_their_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            original = Path.open
+            foreign = []
+            count = 0
+
+            def failing_open(target: Path, mode="r", *args, **kwargs):
+                nonlocal count
+                if mode == "xb":
+                    count += 1
+                    if count == 5:
+                        path = target.parent / "foreign.txt"
+                        with original(path, "wb") as handle:
+                            handle.write(b"unrelated")
+                        foreign.append(path)
+                        raise OSError("disk full")
+                return original(target, mode, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "open", failing_open):
+                code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertEqual(b"unrelated", foreign[0].read_bytes())
+            self.assertTrue(foreign[0].parent.is_dir())
+            self.assertEqual({"infra/app.json", foreign[0].relative_to(root).as_posix()}, files(root))
+
+    def test_rollback_preserves_preexisting_empty_output_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            existing = root / ".github"
+            existing.mkdir()
+            original = Path.open
+
+            def failing_open(target: Path, mode="r", *args, **kwargs):
+                if mode == "xb" and target.name == ".scaffold.azure.json":
+                    raise OSError("metadata disk full")
+                return original(target, mode, *args, **kwargs)
+
+            with unittest.mock.patch.object(Path, "open", failing_open):
+                code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertTrue(existing.is_dir())
+            self.assertEqual([], list(existing.iterdir()))
+            self.assertEqual({"infra/app.json"}, files(root))
+
+    def test_conflicting_outputs_and_metadata_are_all_reported_without_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            targets = [root / "infra/foundation/versions.tf", root / ".scaffold.azure.json"]
+            for target in targets:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(b"existing")
+            before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+            with unittest.mock.patch.object(scaffold, "write_project") as writer:
+                code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            writer.assert_not_called()
+            for target in targets:
+                self.assertIn(str(target), err)
+            self.assertEqual(before, {path: path.read_bytes() for path in root.rglob("*") if path.is_file()})
+
+    def test_existing_directory_at_profile_target_is_a_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            (root / "infra/app.json").mkdir()
+            external = write_profile(Path(temporary), self.profile, "external.json")
+            code, _, err = self.scaffold(root, external)
+            self.assertEqual(1, code, err)
+            self.assertIn("already exists", err)
+            self.assertTrue((root / "infra/app.json").is_dir())
+            self.assertEqual(set(), files(root))
+
+    def test_non_directory_output_ancestor_is_rejected_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            (root / ".github").write_bytes(b"existing")
+            code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertIn("not a directory", err)
+            self.assertEqual(b"existing", (root / ".github").read_bytes())
+            self.assertEqual({"infra/app.json", ".github"}, files(root))
+
+    def test_dangling_output_symlink_is_rejected_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            link = root / ".scaffold.azure.json"
+            self.symlink(link, Path(temporary) / "missing.json")
+            code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertIn("redirected output path", err)
+            self.assertTrue(link.is_symlink())
+            self.assertEqual({"infra/app.json"}, files(root))
+
+    def test_profile_target_symlink_is_rejected_even_when_identical(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            external = write_profile(Path(temporary), self.profile, "external.json")
+            link = root / "infra/app.json"
+            self.symlink(link, external)
+            content = external.read_bytes()
+            code, _, err = self.scaffold(root, external)
+            self.assertEqual(1, code, err)
+            self.assertIn("redirected output path", err)
+            self.assertTrue(link.is_symlink())
+            self.assertEqual(content, external.read_bytes())
+            self.assertEqual({"infra/app.json"}, files(root))
+
+    def test_output_ancestor_symlink_is_rejected_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            outside = Path(temporary) / "outside"
+            outside.mkdir()
+            self.symlink(root / ".github", outside, directory=True)
+            code, _, err = self.scaffold(root)
+            self.assertEqual(1, code, err)
+            self.assertIn("redirected output path", err)
+            self.assertEqual([], list(outside.iterdir()))
+            self.assertEqual({"infra/app.json"}, files(root))
+
+    def test_project_root_symlink_is_rejected_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            link = Path(temporary) / "redirect"
+            self.symlink(link, root, directory=True)
+            code, _, err = self.scaffold(link)
+            self.assertEqual(1, code, err)
+            self.assertIn("redirected output path", err)
+            self.assertEqual({"infra/app.json"}, files(root))
+
+    def test_project_ancestor_symlink_is_rejected_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            link = Path(temporary) / "redirect"
+            self.symlink(link, Path(temporary), directory=True)
+            code, _, err = self.scaffold(link / "project")
+            self.assertEqual(1, code, err)
+            self.assertIn("redirected output path", err)
+            self.assertEqual({"infra/app.json"}, files(root))
+
+    @unittest.skipUnless(os.name == "nt", "Windows junction test")
+    def test_output_ancestor_junction_is_rejected_before_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.profile)
+            outside = Path(temporary) / "outside"
+            outside.mkdir()
+            link = root / ".github"
+            result = subprocess.run(
+                ["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+            )
+            if result.returncode != 0:
+                self.skipTest(f"junctions unavailable: {result.stderr}")
+            try:
+                code, _, err = self.scaffold(root)
+                self.assertEqual(1, code, err)
+                self.assertIn("redirected output path", err)
+                self.assertEqual([], list(outside.iterdir()))
+                self.assertEqual({"infra/app.json"}, files(root))
+            finally:
+                link.rmdir()
+
+    def test_identical_profile_is_omitted_from_dry_run_outputs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            path, content, modified = self.existing_profile(root)
+            external = Path(temporary) / "external.json"
+            external.write_bytes(content)
+            code, out, err = self.scaffold(root, external, dry_run=True)
+            self.assertEqual(0, code, err)
+            self.assertNotIn(str(path), out.splitlines())
+            self.assertEqual({"infra/app.json"}, files(root))
+            self.assertEqual(content, path.read_bytes())
+            self.assertEqual(modified, path.stat().st_mtime_ns)
 
 
 class GenerationTests(unittest.TestCase):
