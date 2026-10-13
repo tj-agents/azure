@@ -1,6 +1,10 @@
 # The app stack drives Azure infrastructure
 
-Status: planning (2026-10-12). Authorized by Tommy: "finish this off now", after agreeing that dotnet drives
+Status: complete (2026-10-13). Phase A (tj-agents/azure#3) and Phase B (tj-agents/dotnet#48) are merged. The
+queued dotnet convention changes continue in the dotnet repository's
+`plans/single-standard-conventions/GOAL.md`.
+
+Original status: planning (2026-10-12). Authorized by Tommy: "finish this off now", after agreeing that dotnet drives
 and azure stays app-agnostic. Decisions marked **pending** below need Tommy before Phase A starts.
 
 ## Outcome
@@ -162,6 +166,39 @@ The shared scaffold contract's `--into` section is on hold for the same reason (
     `infra/SCAFFOLD_GAPS.md` items 5, 7 and 8 were added to Phase A as addition 5.
   - Notify the sandbox-dotnet session (`sandbox-dotnet-17` after the reopen; formerly `repos-4c`) when each
     PR merges.
+- 2026-10-13: queued by Tommy (relayed by sandbox-dotnet-17) as its own dotnet PR straight after PR #48
+  merges, with exactly one standard and no aliases:
+  - `dotnet:structure-single-service` replaces `<Name>.Core` with `<Name>.Domain` (entities, value objects,
+    domain events) plus `<Name>.Application` (services, repository interfaces, DTOs and requests, mappers),
+    keeps `<Name>.Infrastructure`, and renames the host `<Name>.Api` to `<Name>.Web`.
+  - A naming rule in both structure contracts: "Api" is a module's endpoint layer and "Web" is the process
+    host.
+  - Carried through the scaffold, its tests and the cloud=azure profile.
+  - A repository-wide search must leave no `.Core` or single-service Api-host references.
+  - Lower priority, "at some point": `dotnet:learning` must not default to treating Tommy as a .NET
+    beginner.
+  - Also for the same conventions PR, one standard each, from sandbox-dotnet evidence:
+    - test naming has one owner and one rule for every tier; testing-integration's two-segment example
+      names contradict testing-unit's `Method_Scenario_ExpectedBehaviour`;
+    - the per-tier assertion library has one owner, and the integration example's
+      `Assert.Contains`/`Assert.Equal` mixed with `ShouldBe` must obey it;
+    - the scaffold's IntegrationTests project must reference Shouldly and build-gate the per-tier library;
+    - the testing-integration example must not capture the fixture in a primary constructor (dotnet:style
+      requires explicit `private readonly` fields).
+    - `this.` only in constructor assignments: drop the every-field-access rule, and set the scaffold
+      `.editorconfig` to `dotnet_style_qualification_for_field = false:error`.
+    - Conventions lead with code-snippet examples rather than prose, and every example obeys every other
+      contract.
+    - Root cause of unenforced standards: `dotnet:scaffold` never emits `.agents/skill-routes.json`, so
+      scaffolded repositories are born ungated. The scaffold must generate the dotnet-service route table
+      (`gen_skill_routes.py --kind dotnet-service --into <project>`) with a test, and the table must route
+      every test tier to the single test-naming owner.
+- 2026-10-13: **Phase A and Phase B are merged.**
+  - tj-agents/azure#3 merged as `d9dbaf6`; its CI on main is green.
+  - tj-agents/dotnet#48 merged as `a5b8a07`. Its CI at `bf3731d` was green, including the real azure
+    end-to-end on Windows and Ubuntu.
+  - Both reviews passed after their fixes, and sandbox-dotnet was notified of each merge.
+  - Next: the dotnet conventions PR with every queued item above.
 - 2026-10-13: **pending side workstream (standards defect).** core `continuation_stop.py` evaluates the
   delivery binding in the session's launch directory and never checks which session owns it.
   - Crash recovery started this session in Codex's `core/.worktrees/Fix-ContinuationStopBindingHead`
@@ -204,7 +241,8 @@ The shared scaffold contract's `--into` section is on hold for the same reason (
 
 ## Next Steps
 
-1. Send the coordinator the contract revision: profile fields, app-agnostic components, workflow flow,
-   interactive mode and host options.
-2. Write the Phase A spec and dispatch it at L4. Review, PR and merge.
-3. Phase B on dotnet, then the end-to-end verification on the sandbox preset.
+None in this goal. Follow-ups owned elsewhere:
+- dotnet convention changes: tj-agents/dotnet `plans/single-standard-conventions/GOAL.md`;
+- the core Stop-hook launch-directory ownership defect: a Codex bounded side workstream, waiting for
+  session capacity under Tommy's 7-session limit;
+- the `SCAFFOLD_CONTRACT.md` revision: the coordinator.
