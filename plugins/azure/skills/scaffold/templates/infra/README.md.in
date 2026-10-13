@@ -86,6 +86,9 @@ in its Actions OIDC settings before the first plan, or no login will match.
 `database.schemas` (default `["public"]`) lists every Postgres schema a migration needs; the migration job
 creates each non-`public` one and grants every workload identity the same privileges on it as on `public`.
 
+An App Service workload's `sticky` list names its own effective settings that should stay with the production
+slot across a swap, instead of swapping along with the rest of `app_settings`.
+
 ## The deploy workflow
 
 `deploy-environment.yml` is a reusable workflow (`workflow_call`) that `ci.yml` (environment `ci`),

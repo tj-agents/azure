@@ -36,7 +36,7 @@ PROFILE_TOKENS = {
 }
 
 TOP_LEVEL_KEYS = {"schema_version", "name", "workloads", "database", "settings", "verify"}
-WORKLOAD_KEYS = {"id", "kind", "port", "probes", "runtime", "build", "settings", "messaging"}
+WORKLOAD_KEYS = {"id", "kind", "port", "probes", "runtime", "build", "settings", "messaging", "sticky"}
 SCHEMA_NAME_PATTERN = re.compile(r"^[a-z_][a-z0-9_]{0,62}$")
 
 TEMPLATE_TOKEN = re.compile(r"\{\{|\}\}|\{([A-Za-z][A-Za-z0-9_.]*)\}|[{}]")
@@ -397,6 +397,22 @@ def validate_workload_messaging(prefix: str, messaging: object, values: dict) ->
     return errors
 
 
+def validate_sticky(
+    prefix: str, sticky: object, host: str, profile_settings: object, workload_settings: object
+) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(sticky, list) or not all(isinstance(item, str) for item in sticky):
+        return [f"{prefix}.sticky: must be a list of strings"]
+    if host != "app-service":
+        errors.append(f"{prefix}.sticky: only valid on an App Service host")
+        return errors
+    effective_keys = set(profile_settings or {}) | set(workload_settings or {})
+    for name in sticky:
+        if name not in effective_keys:
+            errors.append(f"{prefix}.sticky: {name!r} is not a key of this workload's effective settings")
+    return errors
+
+
 def _valid_runtime(runtime: object, allowed_names: set[str] | None) -> bool:
     if not isinstance(runtime, dict):
         return False
@@ -559,6 +575,10 @@ def validate_profile(profile: object, values: dict) -> list[str]:
         workload_messaging = workload.get("messaging")
         if workload_messaging is not None:
             errors += validate_workload_messaging(f"{prefix}.messaging", workload_messaging, values)
+
+        sticky = workload.get("sticky")
+        if sticky is not None:
+            errors += validate_sticky(prefix, sticky, host, profile.get("settings"), workload_settings)
 
     if has_database:
         if not isinstance(database, dict):
@@ -767,6 +787,7 @@ def render_workloads_tf(profile: dict, values: dict) -> str:
         publishes = messaging.get("publishes") or []
         consumes = messaging.get("consumes") or []
         uses_key_vault = workload_uses_token(profile, workload, "keyvault.uri")
+        sticky = workload.get("sticky") or []
 
         pairs = [
             ("kind", hcl_string(kind)),
@@ -778,6 +799,7 @@ def render_workloads_tf(profile: dict, values: dict) -> str:
             ("publishes", hcl_list(publishes)),
             ("consumes", hcl_consume_list(consumes)),
             ("uses_key_vault", "true" if uses_key_vault else "false"),
+            ("sticky", hcl_list(sticky)),
         ]
         lines.append(f"    {workload_id} = {{")
         lines.extend(aligned_lines(pairs, "      "))
