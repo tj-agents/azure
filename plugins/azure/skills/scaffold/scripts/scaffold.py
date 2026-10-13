@@ -1376,7 +1376,7 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
             --slot staging \\
             --src-path "$RUNNER_TEMP/{workload_id}.zip" \\
             --type zip
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             code=$(az webapp deployment slot show --slot staging \\
               --name "{name}-{workload_id}-app" \\
               --resource-group "$RESOURCE_GROUP" \\
@@ -1400,7 +1400,7 @@ def render_deploy_steps(profile: dict, values: dict, name: str) -> list[str]:
           RESOURCE_GROUP: ${{{{ steps.foundation-outputs.outputs.resource_group_name }}}}
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             ready=$(az containerapp revision list \\
               --name "{name}-{workload_id}-ca" \\
               --resource-group "$RESOURCE_GROUP" \\
@@ -1616,7 +1616,7 @@ jobs:
           az containerapp job start \\
             --name "{name}-migrate-caj" \\
             --resource-group "$RESOURCE_GROUP"
-          for attempt in $(seq 1 30); do
+          for _ in $(seq 1 30); do
             status=$(az containerapp job execution list \\
               --name "{name}-migrate-caj" \\
               --resource-group "$RESOURCE_GROUP" \\
