@@ -88,7 +88,12 @@ The rule each item follows is in brackets.
 - 2026-10-13: assessment done (gaps listed above). Goal written on `Feature/ActionsConformance` from main
   `682acf7`.
 
+- 2026-10-13: slice 1 implemented (`73c7efc`, `52894b9`): pr/ci/prod/pr-closed workflows with pinned SHAs,
+  `verify`, `database.schemas`, per-type `messaging.consumes`, `infra/.gitignore`, and an `actions-lint` CI
+  job. 83 unittests and the 5-case Terraform gate pass. actionlint 1.7.12 and zizmor 1.30.1 are clean on
+  every preset; zizmor's `self-repository` audit is ignored for generated files only, because actionlint
+  rejects the `$/` syntax it asks for. This repository's own `terraform.yml` is pinned and linted too.
+
 ## Next Steps
 
-1. Implement slice 1, verify (unittests, the Terraform gate, actionlint and zizmor), review, PR and merge.
-   Then notify `sandbox-dotnet-17`.
+1. Review, PR and merge slice 1, then notify `sandbox-dotnet-17`. Then slice 3 (sticky slot settings).
