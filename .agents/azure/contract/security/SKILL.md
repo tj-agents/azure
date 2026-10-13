@@ -34,8 +34,7 @@ Owns identities, role assignments, secrets, deploy authentication and network ex
   client secret.
   - Subjects use the repository's format: the immutable `repo:<owner>@<owner-id>/<repo>@<repo-id>:...` form
     for repositories created after 2026-07-15.
-  - Workflows set `permissions: contents: read` at the top (per `github-actions:security`), each job
-    re-declaring its full list, and grant `id-token: write` only on the job that signs in.
+  - Workflow permissions, including `id-token: write`, follow `github-actions:security`.
   - Source: GitHub docs, "Configuring OpenID Connect in Azure"; GitHub changelog 2026-04-23.
 - A `private_networking` variable, default `true`, controls data-service exposure.
   - When on: data services have public access off and use a private endpoint plus a `privatelink.*` DNS
