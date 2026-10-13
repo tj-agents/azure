@@ -899,6 +899,171 @@ class VnetIntegrationTests(unittest.TestCase):
             self.assertIn("virtual_network_subnet_id = data.azurerm_subnet.functions.id", flex_tf)
 
 
+class StickySettingsTests(unittest.TestCase):
+    def test_sticky_on_background_workload_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {"id": "worker", "kind": "background", "build": {"image": "x"}, "sticky": ["FOO"]}
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("only valid on an App Service host", err)
+
+    def test_sticky_on_http_container_apps_host_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 80,
+                    "probes": {"liveness": "/a", "readiness": "/b"},
+                    "build": {"image": "x"},
+                    "settings": {"FOO": "bar"},
+                    "sticky": ["FOO"],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("only valid on an App Service host", err)
+
+    def test_unknown_sticky_name_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 80,
+                    "probes": {"liveness": "/a", "readiness": "/b"},
+                    "runtime": {"name": "dotnet", "version": "10.0"},
+                    "build": {"package": "x"},
+                    "sticky": ["NOPE"],
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("'NOPE' is not a key of this workload's effective settings", err)
+
+    def test_sticky_must_be_a_list_of_strings_exits_2(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [
+                {
+                    "id": "api",
+                    "kind": "http",
+                    "port": 80,
+                    "probes": {"liveness": "/a", "readiness": "/b"},
+                    "runtime": {"name": "dotnet", "version": "10.0"},
+                    "build": {"package": "x"},
+                    "sticky": "FOO",
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, profile)
+            code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+            self.assertEqual(2, code)
+            self.assertIn("sticky: must be a list of strings", err)
+
+    def app_service_profile(self, sticky: object = None) -> dict:
+        workload = {
+            "id": "api",
+            "kind": "http",
+            "port": 80,
+            "probes": {"liveness": "/a", "readiness": "/b"},
+            "runtime": {"name": "dotnet", "version": "10.0"},
+            "build": {"package": "echo build"},
+            "settings": {"WORKLOAD_ONLY": "x"},
+        }
+        if sticky is not None:
+            workload["sticky"] = sticky
+        return {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [workload],
+            "settings": {"SHARED": "y"},
+        }
+
+    def test_absent_sticky_renders_no_block(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.app_service_profile())
+            code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+            self.assertEqual(0, code, err)
+            workloads_tf = (root / "infra/instance/workloads.tf").read_text(encoding="utf-8")
+            self.assertIn("sticky          = []", workloads_tf)
+            app_service_tf = (root / "infra/instance/app-service.tf").read_text(encoding="utf-8")
+            self.assertIn('dynamic "sticky_settings"', app_service_tf)
+            self.assertIn("length(each.value.sticky) > 0", app_service_tf)
+
+    def test_malformed_settings_with_sticky_exits_2_without_writes(self) -> None:
+        for scope in ("profile", "workload"):
+            for settings in (7, [["KEY"]]):
+                with self.subTest(scope=scope, settings=settings), tempfile.TemporaryDirectory() as temporary:
+                    root = new_project(temporary)
+                    profile = self.app_service_profile(sticky=[])
+                    target = profile if scope == "profile" else profile["workloads"][0]
+                    target["settings"] = settings
+                    write_profile(root, profile)
+                    before = files(root)
+
+                    code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+
+                    self.assertEqual(2, code, err)
+                    self.assertIn("settings: must be an object", err)
+                    self.assertEqual(before, files(root))
+
+    def test_empty_sticky_list_is_valid(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.app_service_profile(sticky=[]))
+            code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+            self.assertEqual(0, code, err)
+            workloads_tf = (root / "infra/instance/workloads.tf").read_text(encoding="utf-8")
+            self.assertIn("sticky          = []", workloads_tf)
+
+    def test_sticky_names_may_come_from_profile_or_workload_settings(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.app_service_profile(sticky=["WORKLOAD_ONLY", "SHARED"]))
+            code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+            self.assertEqual(0, code, err)
+            workloads_tf = (root / "infra/instance/workloads.tf").read_text(encoding="utf-8")
+            self.assertIn('sticky          = ["WORKLOAD_ONLY", "SHARED"]', workloads_tf)
+
+    def test_sticky_settings_block_renders_in_the_web_app_resource(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = new_project(temporary)
+            write_profile(root, self.app_service_profile(sticky=["WORKLOAD_ONLY"]))
+            code, _, err = run(["new", "--into", str(root), "--set", "http_host=app-service", "--no-input"])
+            self.assertEqual(0, code, err)
+            app_service_tf = (root / "infra/instance/app-service.tf").read_text(encoding="utf-8")
+            main_resource = app_service_tf.split('resource "azurerm_linux_web_app_slot"')[0]
+            self.assertIn('dynamic "sticky_settings"', main_resource)
+            self.assertIn("app_setting_names = sticky_settings.value", main_resource)
+            slot_resource = app_service_tf.split('resource "azurerm_linux_web_app_slot"')[1]
+            self.assertNotIn("sticky_settings", slot_resource)
+
+
 class KeyVaultOperatorAccessTests(unittest.TestCase):
     def test_current_principal_gets_secrets_officer(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1997,6 +2162,7 @@ class TerraformGateTests(unittest.TestCase):
             profile = json.loads(json.dumps(SANDBOX_PROFILE))
             profile["workloads"][0]["runtime"] = {"name": "dotnet", "version": "10.0"}
             profile["workloads"][0]["build"] = {"package": "echo build-api"}
+            profile["workloads"][0]["sticky"] = ["AZURE_CLIENT_ID"]
             profile["workloads"][2]["build"] = {"image": "echo build-fn"}
             project = generate(
                 root, profile, "http_host=app-service", "functions_host=container-apps", "vnet=true", "key_vault=true"

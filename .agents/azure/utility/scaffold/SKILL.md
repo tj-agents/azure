@@ -102,6 +102,12 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
     workload `Azure Service Bus Data Receiver` at that subscription's scope. The deploy workflow removes
     each subscription's `$Default` rule after applying, so only `handled-types` is left filtering. A
     workload gets no role on a topic or subscription it doesn't name.
+  - `sticky`: optional, a list of setting names. Valid only when this workload's host is App Service — any
+    other host exits 2. Each name must be a key of this workload's effective settings (top-level merged
+    with its own); an unknown name exits 2. Renders into the web app's (not the staging slot's)
+    `sticky_settings { app_setting_names = [...] }` (via `hcl_list`, so each name is escaped through
+    `escape_hcl_string` like every other HCL list), so a slot swap leaves those settings behind instead of
+    carrying them across.
 - `database`: optional, `engine` must be `postgres`. An optional `schemas` list (default `["public"]`,
   identifiers matching `^[a-z_][a-z0-9_]{0,62}$`, unique) names every schema the migration job prepares:
   it creates each non-`public` schema (`public` always exists) owned by the migrator, then grants every
@@ -128,8 +134,8 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
 
 ## Generated Terraform
 
-`infra/instance/workloads.tf` holds `locals.workloads` (by id: kind, host, port, probes, runtime, and its
-`messaging.publishes`/`consumes` topics) and
+`infra/instance/workloads.tf` holds `locals.workloads` (by id: kind, host, port, probes, runtime, its
+`messaging.publishes`/`consumes` topics, and its `sticky` list) and
 `locals.settings` (by id: an env map of Terraform expressions resolved from the profile's tokens); both are
 always present, empty when the profile has no workloads. One user-assigned identity per workload lives in
 `identity.tf`. Each host component — `container-apps.tf`, `app-service.tf`, `flex-consumption.tf` — holds

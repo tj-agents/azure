@@ -233,6 +233,22 @@ this pass by prod's additional release-commit assertion.
 `azure:testing`, `azure:errors`, `azure:libraries`, `azure:domain-design`: "_Nothing yet._" in each — N/A,
 no rules recorded to conform to.
 
+### Slice 3 re-check (sticky settings)
+
+Re-read `azure:security`, `azure:style` and `azure:structure` in full against this slice before finishing
+it. This slice touches no workflow, so the `github-actions` contracts don't apply here.
+
+- `azure:security`: no new identity, role assignment, secret, `time_sleep` or network setting — `sticky`
+  only adds a nested `sticky_settings` block to the existing `azurerm_linux_web_app.main` resource, naming
+  settings that already exist. N/A/unaffected.
+- `azure:style`: no new resource (so no new name to build, no new `local.tags` to attach) and no new
+  Terraform `variable` (so no `type`/`description`/`validation` to add) — `sticky` is a `locals.workloads[id]`
+  field, sourced from the profile, like `publishes`/`consumes` already are. N/A/unaffected. The one new
+  comment-free HCL addition (`dynamic "sticky_settings"`) adds no comments.
+- `azure:structure`: no new file, no new root, no change to how `instance` reads `foundation` — `sticky`
+  renders inside the existing `app-service.tf`, which `azure:structure`'s File structure section already
+  lists. N/A/unaffected.
+
 ## Slices
 
 1. azure (this branch, PR to tj-agents/azure): everything above, with tests and actionlint/zizmor in CI.
@@ -326,8 +342,34 @@ no rules recorded to conform to.
     the script, with `/usr/bin` and `/bin` (`43f962a`).
   - 114 unittests pass locally under both bash and PowerShell, and CI is green on every job at `43f962a`.
 
+- 2026-10-13: slice 3 (sticky slot settings), on `Feature/StickySlotSettings` from `main` `f3a44b0`. Added
+  an optional per-workload profile field `sticky`: a list of setting names. Valid only when the workload's
+  host is App Service (`validate_sticky`; any other host exits 2); each name must be a key of that
+  workload's effective settings (profile-level merged with its own), or exit 2 naming the bad key. An
+  absent or empty list is valid and renders nothing. `render_workloads_tf` carries the list into
+  `locals.workloads[id].sticky` through `hcl_list` (so each name is escaped through `escape_hcl_string`,
+  same as every other HCL list); `app-service.tf.in` renders it as a `dynamic "sticky_settings"` block on
+  the main `azurerm_linux_web_app` resource only (not the staging slot), `for_each` only emitting the block
+  when the list is non-empty. Added the Slice 3 re-check above (`azure:security`, `azure:style`,
+  `azure:structure`; no workflow touched, so the `github-actions` contracts don't apply). Updated SKILL.md
+  (the workload-field list, the `locals.workloads` shape) and README.md.in; no `options.json` or structure-
+  contract change needed (`sticky` is a profile field, not a CLI option, and `azure:structure` describes file
+  layout, not the profile schema). 8 new tests cover validation (wrong host on both `background` and `http`
+  kinds, an unknown name, a non-list value, the empty and absent cases) and rendering (profile- and
+  workload-level settings both counting, the block landing on the main resource and not the slot); the
+  existing App Service Terraform-gate case gained a `sticky` entry. 122 unittests (5 Terraform-gate skipped
+  outside `AZURE_SCAFFOLD_TERRAFORM`) and the 5-case Terraform gate pass, run one Terraform process at a
+  time; actionlint (with shellcheck) and zizmor are clean on all four lint presets.
+
 ## Next Steps
 
-1. Merge slice 1 (tj-agents/azure#5), then notify `sandbox-dotnet-17` to regenerate its workflows.
-2. Slice 3: sticky slot settings.
-3. dotnet slice E, which hands `verify` and `database.schemas` to this profile.
+1. Repair B001, finish independent review, then open and merge the sticky-settings PR.
+2. Finish and deliver the dotnet snippet-gate branch.
+3. Move the complete workflow set to github-actions; Azure supplies only its own steps.
+4. Collapse dotnet scaffolding to its one Web API shape; slice E is folded into item 0b of the canonical handoff.
+
+## Codex pickup - 2026-10-13
+
+The successor owns this branch and the canonical handoff at `C:\Users\TommySeery\.claude\plans\tj-agents\HANDOFF_STANDARDS_REMAINING.md`. Tommy authorized available models for implementation and independent review on 2026-10-13, superseding the earlier model-capacity gate. Phase lane: L4, a specified local repair with regression coverage, executed by the current owner under that override.
+
+B001 is repaired by guarding effective-settings key resolution with dictionary checks. Nine sticky tests pass, including a regression with four malformed top-level/workload cases that verifies exit 2 without writes. Generated outputs are current. Full Azure/Terraform validation and independent review are next; no subscription plan/apply/az command is authorized.
