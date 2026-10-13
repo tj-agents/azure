@@ -185,7 +185,11 @@ per rule: where it's satisfied (file:job), or why it's N/A.
   hyphen both shortens the budget and isn't in the Terraform variable's validated charset; `pr-closed.yml`
   runs on `types: [closed]` regardless of merged/closed.
 - A deploy succeeds only once serving, not merely ready: Container Apps wait for `Healthy`, Flex Consumption
-  for `Running`, App Service rechecked against production after the slot swap.
+  for `Running`, App Service rechecked against production after the slot swap — and, found false on the
+  second review (every wait exited 0 on timeout, so a deploy could "succeed" without ever becoming ready),
+  now genuinely true: each loop fails the job with `::error file=.github/workflows/deploy-environment.yml::
+  <workload> did not become <state> within 5 minutes` on a timeout, and the App Service swap runs only
+  after staging returned 200. Executed with stub `az`/`curl` in both the ready and never-ready cases.
 
 `github-actions:libraries`:
 - Prefer first-party/vendor actions, a community action needs a reason, a short script beats a
@@ -284,6 +288,34 @@ no rules recorded to conform to.
   corrected to match what every generated workflow actually does. 103 unittests and the 5-case Terraform
   gate pass; actionlint (with shellcheck) and zizmor are clean on all four lint presets and on
   `terraform.yml`.
+
+- 2026-10-13: PR #5's second review (at `9a98f9e`, which pointed `azure:security` at
+  `github-actions:security`) found four more defects. Fixed all four:
+  1. Every deploy readiness loop in `render_deploy_steps` (Flex Consumption `Running`, App Service
+     pre-swap and post-swap readiness, Container Apps `Healthy`) exited 0 on a timeout regardless of
+     whether the workload ever became ready, and the App Service swap ran even if staging never returned
+     200. Each loop now tracks whether it broke out ready and, if not, fails with
+     `::error file=.github/workflows/deploy-environment.yml::<workload> did not become <state> within 5
+     minutes`; the swap only runs after a successful pre-swap check. Tested by extracting each loop and
+     executing it with stub `az`/`curl` on `PATH` (sleep stubbed to return instantly), for both a
+     never-ready and a ready stub, including the swap-gating behaviour. Corrected the "serving, not merely
+     ready" claim in this file, `SKILL.md` and `README.md.in` to describe the now-true behaviour.
+  2. `validate_profile` never ran `_has_actions_expression` on `probes.liveness`/`probes.readiness`, even
+     though `readiness` is spliced directly into the generated `run:` body (not routed through a step
+     `env:`, unlike `build.*`). Added the check and a test.
+  3. This repository's own `terraform.yml` had no `concurrency:` or `timeout-minutes`. Added the
+     verification group (`cancel-in-progress: true`) and `timeout-minutes` on both jobs; re-linted clean.
+  4. `assert-release-commit` compared `github.sha`, which GitHub already dereferences for a tag push, but
+     assumed rather than confirmed that. The script now resolves the pushed ref itself
+     (`git.getRef` on `tags/<name>`) and, only if `object.type === "tag"` (an annotated tag), dereferences
+     it with `git.getTag` before comparing. Tested by extracting the `script:` block and running it under
+     real `node` with a mocked `github`/`context`/`core`, covering a lightweight tag, an annotated tag
+     (confirming the dereferenced commit is compared, not the tag object's own sha), both tags mismatching,
+     and no successful `ci.yml` run.
+
+  113 unittests (5 Terraform-gate skipped outside `AZURE_SCAFFOLD_TERRAFORM`) and the 5-case Terraform gate
+  pass, run one Terraform process at a time; actionlint (with shellcheck) and zizmor are clean on all four
+  lint presets and on `terraform.yml`.
 
 ## Next Steps
 
