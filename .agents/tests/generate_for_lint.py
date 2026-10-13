@@ -11,10 +11,25 @@ ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / ".agents/azure/utility/scaffold/scripts/scaffold.py"
 FIXTURE_PROFILE = Path(__file__).resolve().parent / "fixtures" / "sandbox-profile.json"
 
+
+def sandbox_profile() -> dict:
+    return json.loads(FIXTURE_PROFILE.read_text(encoding="utf-8"))
+
+
+def app_service_profile() -> dict:
+    profile = sandbox_profile()
+    api, _, fn = profile["workloads"]
+    api["runtime"] = {"name": "dotnet", "version": "10.0"}
+    api["build"] = {"package": "echo build-api"}
+    fn["build"] = {"image": "echo build-fn"}
+    return profile
+
+
 CASES = [
     ("empty", {"schema_version": 1, "name": "empty", "workloads": []}, []),
-    ("sandbox-public", json.loads(FIXTURE_PROFILE.read_text(encoding="utf-8")), ["--set", "messaging=service-bus", "--set", "topics=orders"]),
-    ("sandbox-private", json.loads(FIXTURE_PROFILE.read_text(encoding="utf-8")), ["--preset", "private", "--set", "messaging=service-bus", "--set", "topics=orders"]),
+    ("sandbox-public", sandbox_profile(), ["--set", "messaging=service-bus", "--set", "topics=orders"]),
+    ("sandbox-private", sandbox_profile(), ["--preset", "private", "--set", "messaging=service-bus", "--set", "topics=orders"]),
+    ("sandbox-app-service", app_service_profile(), ["--preset", "private", "--set", "http_host=app-service", "--set", "functions_host=container-apps", "--set", "messaging=service-bus", "--set", "topics=orders"]),
 ]
 
 
