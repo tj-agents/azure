@@ -317,6 +317,17 @@ no rules recorded to conform to.
   pass, run one Terraform process at a time; actionlint (with shellcheck) and zizmor are clean on all four
   lint presets and on `terraform.yml`.
 
+- 2026-10-13: the third review (at `4739700`) found two problems.
+  - `probes.readiness` was still spliced into the App Service `run:` body, guarded only by a leading `/`,
+    so `/a$(cmd)` would run a command. It now goes through a step `env:` (`READINESS_PATH`), and probe
+    paths must match a URL-path character set (`1507eea`).
+  - The stub harness prepended a POSIX stub directory onto the Windows `PATH`. Under kit's Windows verify
+    job, bash never saw it, the real `sleep` ran, and the loops timed out. Stubs now go on `PATH` inside
+    the script, with `/usr/bin` and `/bin` (`43f962a`).
+  - 114 unittests pass locally under both bash and PowerShell, and CI is green on every job at `43f962a`.
+
 ## Next Steps
 
-1. Review, PR and merge slice 1, then notify `sandbox-dotnet-17`. Then slice 3 (sticky slot settings).
+1. Merge slice 1 (tj-agents/azure#5), then notify `sandbox-dotnet-17` to regenerate its workflows.
+2. Slice 3: sticky slot settings.
+3. dotnet slice E, which hands `verify` and `database.schemas` to this profile.
