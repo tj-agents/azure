@@ -16,7 +16,7 @@ export AZURE_CONFIG_DIR=$(mktemp -d)
 az login
 cd infra/foundation
 terraform init
-terraform apply -var-file=../env/dev.tfvars
+terraform apply -var-file=../env/ci.tfvars
 ```
 
 Then migrate into the state storage account `apply` just created:
@@ -38,24 +38,35 @@ terraform init -migrate-state \
 `infra/.gitignore` excludes `.terraform/`, state, plan and crash files and any `override.tf*`; it does not
 ignore `.terraform.lock.hcl`, which `azure:build` requires to be committed.
 
-## Repository variables
+## GitHub environments and repository variables
+
+Create three GitHub environments: `ci` (the shared non-production environment `ci.yml` deploys), `preview`
+(a pull request's ephemeral instance) and `prod`. Give `preview` and `prod` protection rules in repository
+settings — at minimum, restrict `prod` to deployments from `v*` tags; a preview or production deploy should
+not run unreviewed.
 
 `pr.yml`, `ci.yml`, `prod.yml`, `pr-closed.yml`, `deploy-environment.yml` and `destroy-preview.yml` read
 these GitHub Actions variables, set once the foundation has deployed:
 
-- `AZURE_FOUNDATION_READY` — `"true"` once the state account above exists; gates `plan`, `deploy-dev` and
+- `AZURE_FOUNDATION_READY` — `"true"` once the state account above exists; gates `plan`, `deploy-ci` and
   `deploy-preview`.
-- `AZURE_PREVIEW_ENABLED` — `"true"` to deploy a preview instance on every pull request; `deploy-preview`
-  is skipped otherwise, but `pr-closed.yml` always runs its destroy (harmless if nothing was deployed).
 - `AZURE_CLIENT_ID` — the deploy identity's client id (`terraform output -raw deploy_identity_client_id`).
 - `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` — the target tenant and subscription.
 - `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT` — the values used in the migration above.
 
-These are environment-scoped: set them once on the `dev` GitHub environment, and again on `prod` with that
-environment's own subscription and storage account. A PR's preview instance deploys and destroys through
-the `dev` environment's values, since it shares `dev`'s foundation.
+Set these on the `ci` environment, and again on `prod` with that environment's own subscription and storage
+account. A PR's preview instance deploys and destroys through the `preview` environment's values, which
+should match `ci`'s, since a preview reuses `ci`'s foundation — only its `instance` root is ephemeral. The
+`ci` foundation's deploy identity carries a federated credential for both the `environment:ci` and
+`environment:preview` OIDC subjects, so the same identity can sign in under either GitHub environment.
 
-Update `infra/env/dev.tfvars` (and `infra/env/prod.tfvars`) with the real GitHub owner, repository and
+A pull request's preview is opt-in: add the `deploy-preview` label to the PR to deploy it, and `pr-closed.yml`
+destroys it on close only if it carried that label. Applying a label requires the repository's `triage` role,
+which is what makes the label a safe trust gate — a pull request from a fork can't grant itself a preview
+deploy by labelling its own PR. `plan`, `deploy-preview`, the state-lock release and `destroy-preview` also
+check `github.event.pull_request.head.repo.full_name == github.repository` as defense in depth.
+
+Update `infra/env/ci.tfvars` (and `infra/env/prod.tfvars`) with the real GitHub owner, repository and
 their numeric ids:
 
 ```sh
@@ -73,9 +84,9 @@ creates each non-`public` one and grants every workload identity the same privil
 
 ## The deploy workflow
 
-`deploy-environment.yml` is a reusable workflow (`workflow_call`) that `ci.yml` (environment `dev`),
-`prod.yml` (environment `prod`, `prod.tfvars`) and `pr.yml`'s preview job (ephemeral, `dev`'s subscription)
-all call. It applies foundation unless deploying a preview — a preview reuses `dev`'s foundation — then for
+`deploy-environment.yml` is a reusable workflow (`workflow_call`) that `ci.yml` (environment `ci`),
+`prod.yml` (environment `prod`, `prod.tfvars`) and `pr.yml`'s preview job (environment `preview`, ephemeral)
+all call. It applies foundation unless deploying a preview — a preview reuses `ci`'s foundation — then for
 every workload in the profile runs its `build.image` or `build.package` command — whichever its host
 needs — through the `build-workload` composite action, with `REGISTRY` (the registry login server),
 `REPOSITORY` (`<name>-<id>`), `TAG` (the commit sha) and, for an image build,
@@ -87,9 +98,13 @@ a readiness wait, then a slot swap), and waits for each Container App's revision
 workload consumes a topic, it also removes each subscription's `$Default` rule, reading the subscription
 list from a Terraform output rather than inlining it.
 
-A pull request's preview instance deploys with `ephemeral_id=pr<N>` (`pr-closed.yml` destroys it through
-`destroy-preview.yml` using the same id): the Terraform variable allows up to 6 lowercase alphanumeric
-characters, so a PR numbered beyond 4 digits has its id truncated to the number's last 4 digits.
+A pull request's preview instance deploys with the full `ephemeral_id=pr<N>` — never truncated, so two PRs
+can never collide on the same preview's state key — through `destroy-preview.yml` using the same id on
+close. The Terraform variable allows up to 6 lowercase alphanumeric characters; a PR number that doesn't fit
+makes the id-computing step fail loudly (`::error::`, naming the limit) rather than deploy under a shortened,
+possibly colliding id. The preview apply and its eventual teardown share one `preview-<id>` concurrency
+group, and a `break-preview-lock` job breaks the state blob's lease over OIDC if a new push cancels an
+in-flight preview apply.
 
 If the profile has a top-level `verify` list, `pr.yml` and `ci.yml` run each command in a sentence-named
 `verify` job before any Azure job.

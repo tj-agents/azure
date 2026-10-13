@@ -80,9 +80,12 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
   - `build.image` is required when the workload's host is Container Apps; `build.package` is required on
     App Service or Flex Consumption. A workload may carry both; azure uses the one its host needs and
     ignores the other. A command may reference `$IMAGE`, `$TAG`, `$PACKAGE`, `$REGISTRY` and `$REPOSITORY`.
-    No `build.*` command, nor a `database.migration.command` entry, may contain `${{` or `}}`; azure passes
-    each command to the workflow through a step `env:` value and runs it with `bash -c`, never splicing it
-    into the YAML, but rejects the GitHub Actions expression syntax outright regardless.
+    No `build.*` command may contain `${{` or `}}`; azure passes it to the workflow through a step `env:`
+    value and runs it with `bash -c`, never splicing it into the YAML, but rejects the GitHub Actions
+    expression syntax outright regardless. A `database.migration.command` entry is held to the same
+    rejection, but for a different reason: it renders into the migration Terraform job's own `command` list
+    (`hcl_list`, via `escape_hcl_string`), not into a workflow step, so the ban is defense in depth rather
+    than a splicing risk.
   - `settings`: optional, same shape and validation as the top-level `settings` below, merged over it for
     that workload — the workload's value wins on a key clash.
   - `messaging`: optional, `{"publishes": [topic...], "consumes": [{"topic": ..., "types": [...]}...]}`.
@@ -140,40 +143,62 @@ options plus the profile-derived flags (`has_database`, `has_migration`, `has_fu
 `http_container_apps`, `http_app_service`, `functions_flex`, `functions_container`, `container_apps_used`),
 and `files/<repo-relative path>.in` holds its fragment of each output file, rendered with
 `__PLACEHOLDER__` substitution and `@if`/`@only-if` flag lines. `templates/` holds the files every project
-gets, including `infra/.gitignore` and `infra/env/{dev,prod}.tfvars`. `workloads.tf`, `migration.tf` and
+gets, including `infra/.gitignore` and `infra/env/{ci,prod}.tfvars`. `workloads.tf`, `migration.tf` and
 every `.github` file are generated directly from the profile in Python, not from `.in` fragments, because
 their shape depends on the workload list itself.
 
 ## The GitHub Actions workflows (`.github/`, when `workflows`)
 
-Every generated workflow follows `github-actions`'s structure, style, security, testing and build
-contracts: a top-level `permissions: contents: read` that jobs re-declare in full, `id-token: write` only
-on a job that signs in, `persist-credentials: false` on every checkout, every remote `uses:` pinned to a
-commit SHA with a `# vX.Y.Z` comment, and a `ci-complete` aggregator in `pr.yml` and `ci.yml`.
+Every generated workflow follows `github-actions`'s structure, style, security, testing, build, errors and
+domain-design contracts: a top-level `permissions: contents: read` that jobs re-declare in full,
+`id-token: write` only on a job that signs in, `persist-credentials: false` on every checkout, every remote
+`uses:` pinned to a commit SHA with a `# vX.Y.Z` comment, a `ci-complete` aggregator in `pr.yml` and
+`ci.yml`, `timeout-minutes` on every job that has one (GitHub does not allow it on a job that only `uses:` a
+reusable workflow — the timeout lives in that reusable workflow's own job instead), and a GitHub environment
+per deploy target: `ci` (the shared non-production environment `ci.yml` deploys), `preview` (a PR's
+instance) and `prod`. Give `preview` and `prod` their own protection rules in repository settings; `prod`
+should allow deployment from `v*` tags only.
 
-- `pr.yml`: an optional sentence-named `verify` job (when the profile has one), `validate` (fmt, init
-  `-backend=false`, validate, matrixed over both roots), `plan` (a real `terraform plan` against the `dev`
-  environment's state, uploaded as an artifact), then `compute-preview-id` and `deploy-preview` — gated on
-  `vars.AZURE_FOUNDATION_READY` and `vars.AZURE_PREVIEW_ENABLED` both being `'true'` — which calls
-  `deploy-environment.yml` with an ephemeral id derived from the PR number.
-- `ci.yml`: the optional `verify` job, `validate`, then `deploy-dev` calling `deploy-environment.yml` for
-  the shared `dev` environment.
-- `prod.yml`: on a `v*` tag push, `validate` then `deploy-prod` calling `deploy-environment.yml` for the
-  protected `prod` environment, using `prod.tfvars`.
-- `pr-closed.yml`: on PR close, recomputes the same ephemeral id and calls `destroy-preview.yml`.
-- `deploy-environment.yml` (`workflow_call`; inputs `environment`, `tfvars-file`, `ephemeral-id`): signs in
-  and initializes Terraform for `foundation` through the `terraform-login-init` composite action; applies
-  foundation unless `ephemeral-id` is set (a preview reuses `dev`'s foundation); reads its outputs; builds
-  every workload (and the migration image) through the `build-workload` composite action, one step per
-  workload; initializes the `instance` root at key `<name>/instance.tfstate`, or
-  `<name>/instance.<ephemeral-id>.tfstate` when ephemeral; runs the migration job if the profile has one;
-  applies the instance with `-var ephemeral_id=$EPHEMERAL_ID` (always passed, empty by default); and
-  deploys each package or waits for each Container App to become healthy.
-- `destroy-preview.yml` (`workflow_call`; inputs `ephemeral-id`, `tfvars-file`): initializes the `instance`
-  root at that PR's ephemeral key and runs `terraform destroy`.
-- `ephemeral_id` is `pr<N>`: the instance variable allows up to 6 lowercase alphanumeric characters, so a
-  PR number longer than 4 digits is truncated to its last 4 digits — documented where it's computed.
-- `.github/dependabot.yml` keeps the `github-actions` ecosystem's pins current, weekly.
+- `pr.yml` triggers on `opened`, `synchronize`, `reopened` and `labeled`, with the verification concurrency
+  group `${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}` and
+  `cancel-in-progress: true`. It runs an optional sentence-named `verify` job (when the profile has one),
+  `validate` (fmt, init `-backend=false`, validate, matrixed over both roots), `plan` (a real
+  `terraform plan` against the `ci` environment's state, uploaded as an artifact), then `compute-preview-id`
+  and `deploy-preview` — gated on `vars.AZURE_FOUNDATION_READY == 'true'` and the PR carrying the
+  `deploy-preview` label — which calls `deploy-environment.yml` for the `preview` environment with an
+  ephemeral id derived from the PR number. A `break-preview-lock` job, `if: cancelled()`, breaks the
+  preview's state blob lease over OIDC if the verification group's `cancel-in-progress` killed a run mid
+  `apply`.
+- `ci.yml` has the fixed concurrency group `ci` (`cancel-in-progress: false`): the optional `verify` job,
+  `validate`, then `deploy-ci` calling `deploy-environment.yml` for the `ci` environment.
+- `prod.yml` has the fixed concurrency group `prod`: on a `v*` tag push, `validate` then `deploy-prod`
+  calling `deploy-environment.yml` for the protected `prod` environment, using `prod.tfvars`.
+- `pr-closed.yml`: on PR close, recomputes the same ephemeral id and, only if the PR carried the
+  `deploy-preview` label, calls `destroy-preview.yml`.
+- `deploy-environment.yml` (`workflow_call`; inputs `environment`, `tfvars-file`, `ephemeral-id`): its job's
+  concurrency group is `preview-<ephemeral-id>` when ephemeral, or `inputs.environment` otherwise, so a
+  preview apply and its eventual `destroy-preview.yml` teardown share one queue. It signs in and initializes
+  Terraform for `foundation` through the `terraform-login-init` composite action; applies foundation unless
+  `ephemeral-id` is set (a preview reuses `ci`'s foundation); reads its outputs; builds every workload (and
+  the migration image) through the `build-workload` composite action, one step per workload; initializes the
+  `instance` root at key `<name>/instance.tfstate`, or `<name>/instance.<ephemeral-id>.tfstate` when
+  ephemeral; runs the migration job if the profile has one; applies the instance with
+  `-var ephemeral_id=$EPHEMERAL_ID` (always passed, empty by default); and deploys each package or waits for
+  each Container App to become healthy.
+- `destroy-preview.yml` (`workflow_call`; inputs `ephemeral-id`, `tfvars-file`): its job shares the same
+  `preview-<ephemeral-id>` concurrency group, initializes the `instance` root at that PR's ephemeral key and
+  runs `terraform destroy`.
+- `ephemeral_id` is the full `pr<N>`, never truncated — two PRs whose numbers differ by exactly a multiple
+  of a truncated width must never collide. The Terraform variable allows up to 6 lowercase alphanumeric
+  characters; a PR number that doesn't fit makes the id-computing step fail with
+  `::error file=<workflow>::…`, naming the limit, instead of deploying under a mangled key.
+- A pull request's preview is opt-in: `deploy-preview` and its teardown run only when the PR carries the
+  `deploy-preview` label. Applying a label needs the repository's `triage` role, so the label is also the
+  trust gate — a fork's PR can't self-label its way into a preview run. `plan`, `deploy-preview`,
+  `break-preview-lock` and `destroy-preview` additionally require
+  `github.event.pull_request.head.repo.full_name == github.repository` as defense in depth.
+- `.github/dependabot.yml` keeps the `github-actions` ecosystem's pins current, weekly, with a 7-day
+  cooldown.
 
 ## Validation and publication
 

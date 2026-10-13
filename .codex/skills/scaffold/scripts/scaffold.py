@@ -706,11 +706,13 @@ def render_migration_settings(profile: dict) -> dict[str, str]:
 
 
 def hcl_list(items: list[str]) -> str:
-    return "[" + ", ".join(f'"{item}"' for item in items) + "]"
+    return "[" + ", ".join(hcl_string(item) for item in items) + "]"
 
 
 def hcl_consume_list(entries: list[dict]) -> str:
-    rendered = [f'{{ topic = "{entry["topic"]}", types = {hcl_list(entry["types"])} }}' for entry in entries]
+    rendered = [
+        f'{{ topic = {hcl_string(entry["topic"])}, types = {hcl_list(entry["types"])} }}' for entry in entries
+    ]
     return "[" + ", ".join(rendered) + "]"
 
 
@@ -1155,6 +1157,7 @@ def render_verify_job(profile: dict) -> str | None:
         "  verify:",
         "    name: Verify the app stack",
         "    runs-on: ubuntu-latest",
+        "    timeout-minutes: 15",
         "    permissions:",
         "      contents: read",
         "    steps:",
@@ -1176,6 +1179,7 @@ def render_validate_job(terraform_version: str, needs: list[str]) -> str:
     return f"""  validate:
     name: Validate Terraform
 {needs_line}    runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     strategy:
@@ -1206,9 +1210,10 @@ def render_validate_job(terraform_version: str, needs: list[str]) -> str:
 def render_plan_job(name: str, terraform_version: str, needs: list[str]) -> str:
     return f"""  plan:
     name: Plan Terraform
-    if: vars.AZURE_FOUNDATION_READY == 'true'
+    if: ${{{{ vars.AZURE_FOUNDATION_READY == 'true' && github.event.pull_request.head.repo.full_name == github.repository }}}}
     needs: {yaml_flow_list(needs)}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       id-token: write
       contents: read
@@ -1238,7 +1243,7 @@ def render_plan_job(name: str, terraform_version: str, needs: list[str]) -> str:
         working-directory: infra/${{{{ matrix.root }}}}
         run: |
           set -euo pipefail
-          terraform plan -no-color -var-file=../env/dev.tfvars | tee "$RUNNER_TEMP/${{{{ matrix.root }}}}-plan.txt"
+          terraform plan -no-color -var-file=../env/ci.tfvars | tee "$RUNNER_TEMP/${{{{ matrix.root }}}}-plan.txt"
 
       - name: Upload the plan
         uses: {UPLOAD_ARTIFACT_REF}
@@ -1250,16 +1255,16 @@ def render_plan_job(name: str, terraform_version: str, needs: list[str]) -> str:
 """
 
 
-def render_compute_ephemeral_id_job(job_id: str) -> str:
+def render_compute_ephemeral_id_job(job_id: str, workflow_file: str) -> str:
     return f"""  {job_id}:
     name: Compute the preview instance id
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     outputs:
       ephemeral-id: ${{{{ steps.ephemeral-id.outputs.ephemeral-id }}}}
     steps:
-{render_checkout_step()}
       - name: Compute the ephemeral id
         id: ephemeral-id
         env:
@@ -1267,18 +1272,24 @@ def render_compute_ephemeral_id_job(job_id: str) -> str:
         run: |
           set -euo pipefail
           digits=$(printf '%s' "$PR_NUMBER" | tr -cd '0-9')
-          # ephemeral_id allows up to 6 alphanumerics: PR numbers over 4 digits are truncated to their last 4.
-          digits="${{digits: -4}}"
-          echo "ephemeral-id=pr${{digits}}" >> "$GITHUB_OUTPUT"
+          id="pr$digits"
+          # ephemeral_id allows at most 6 lowercase alphanumeric characters; a truncated id can collide
+          # between PRs, so a PR number that doesn't fit fails instead of deploying under the wrong state key.
+          if [ "${{#id}}" -gt 6 ]; then
+            echo "::error file={workflow_file}::ephemeral id \\"$id\\" exceeds the 6-character limit for a preview instance id" >&2
+            exit 1
+          fi
+          echo "ephemeral-id=$id" >> "$GITHUB_OUTPUT"
 """
 
 
-def render_ci_complete_job(needs: list[str]) -> str:
+def render_ci_complete_job(needs: list[str], workflow_file: str) -> str:
     return f"""  ci-complete:
     name: CI complete
     if: always()
     needs: {yaml_flow_list(needs)}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions: {{}}
     steps:
       - name: Check that every gate succeeded
@@ -1294,7 +1305,7 @@ def render_ci_complete_job(needs: list[str]) -> str:
           results = json.loads(os.environ["GATE_RESULTS"])
           failed = [name for name, info in results.items() if info["result"] not in ("success", "skipped")]
           if failed:
-              print("failed gates: " + ", ".join(sorted(failed)), file=sys.stderr)
+              print("::error file={workflow_file}::failed gates: " + ", ".join(sorted(failed)), file=sys.stderr)
               sys.exit(1)
           PY
 """
@@ -1456,7 +1467,7 @@ REMOVE_DEFAULT_RULE_STEP = """
                   text=True,
               )
               if result.returncode != 0 and "not found" not in result.stderr.lower():
-                  print(result.stderr, file=sys.stderr)
+                  print("::error file=.github/workflows/deploy-environment.yml::" + result.stderr, file=sys.stderr)
                   sys.exit(1)
           PY
 """
@@ -1489,7 +1500,11 @@ jobs:
   deploy:
     name: Deploy the environment
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     environment: ${{{{ inputs.environment }}}}
+    concurrency:
+      group: ${{{{ inputs.ephemeral-id != '' && format('preview-{{0}}', inputs.ephemeral-id) || inputs.environment }}}}
+      cancel-in-progress: false
     permissions:
       id-token: write
       contents: read
@@ -1625,12 +1640,12 @@ jobs:
               exit 0
             fi
             if [ "$status" = "Failed" ]; then
-              echo "migration job failed" >&2
+              echo "::error file=.github/workflows/deploy-environment.yml::migration job failed" >&2
               exit 1
             fi
             sleep 10
           done
-          echo "migration job timed out" >&2
+          echo "::error file=.github/workflows/deploy-environment.yml::migration job timed out" >&2
           exit 1
 """
         )
@@ -1682,7 +1697,11 @@ jobs:
   destroy:
     name: Destroy the preview instance
     runs-on: ubuntu-latest
-    environment: dev
+    timeout-minutes: 20
+    environment: preview
+    concurrency:
+      group: preview-${{{{ inputs.ephemeral-id }}}}
+      cancel-in-progress: false
     permissions:
       id-token: write
       contents: read
@@ -1723,16 +1742,17 @@ def render_pr_workflow(profile: dict, values: dict, derived: dict) -> str:
     terraform_version = values["terraform_version"]
     has_verify = bool(profile.get("verify"))
 
-    header = f"""name: PR
+    header = """name: PR
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
 
 concurrency:
-  group: pr-${{{{ github.event.pull_request.number }}}}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -1751,26 +1771,67 @@ jobs:
     parts.append(render_plan_job(name, terraform_version, ["validate"]))
     gates.append("plan")
 
-    parts.append(render_compute_ephemeral_id_job("compute-preview-id"))
+    parts.append(render_compute_ephemeral_id_job("compute-preview-id", ".github/workflows/pr.yml"))
     parts.append(
-        f"""  deploy-preview:
+        """  deploy-preview:
     name: Deploy the preview instance
-    if: vars.AZURE_FOUNDATION_READY == 'true' && vars.AZURE_PREVIEW_ENABLED == 'true'
+    if: ${{ !cancelled() && needs.compute-preview-id.result == 'success' && needs.plan.result == 'success' && vars.AZURE_FOUNDATION_READY == 'true' && contains(github.event.pull_request.labels.*.name, 'deploy-preview') && github.event.pull_request.head.repo.full_name == github.repository }}
     needs: [compute-preview-id, plan]
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/deploy-environment.yml
     with:
-      environment: dev
-      tfvars-file: dev.tfvars
-      ephemeral-id: ${{{{ needs.compute-preview-id.outputs.ephemeral-id }}}}
+      environment: preview
+      tfvars-file: ci.tfvars
+      ephemeral-id: ${{ needs.compute-preview-id.outputs.ephemeral-id }}
 """
     )
     gates.append("compute-preview-id")
     gates.append("deploy-preview")
 
-    parts.append(render_ci_complete_job(gates))
+    parts.append(
+        """  break-preview-lock:
+    name: Break a leaked preview state lease
+    if: ${{ cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}
+    needs: [compute-preview-id, deploy-preview]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: preview
+    concurrency:
+      group: preview-${{ needs.compute-preview-id.outputs.ephemeral-id }}
+      cancel-in-progress: false
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Sign in to Azure
+        uses: """
+        + AZURE_LOGIN_REF
+        + """
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Break the leaked state lease
+        env:
+          STORAGE_ACCOUNT: ${{ vars.TFSTATE_STORAGE_ACCOUNT }}
+          BLOB_NAME: """
+        + f"{name}/instance.${{{{ needs.compute-preview-id.outputs.ephemeral-id }}}}.tfstate"
+        + """
+        run: |
+          set -euo pipefail
+          az storage blob lease break \\
+            --account-name "$STORAGE_ACCOUNT" \\
+            --container-name tfstate \\
+            --name "$BLOB_NAME" \\
+            --auth-mode login
+"""
+    )
+    gates.append("break-preview-lock")
+
+    parts.append(render_ci_complete_job(gates, ".github/workflows/pr.yml"))
 
     return "\n".join(part.rstrip("\n") for part in parts) + "\n"
 
@@ -1790,7 +1851,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci
   cancel-in-progress: false
 
 jobs:
@@ -1807,23 +1868,23 @@ jobs:
     gates.append("validate")
 
     parts.append(
-        """  deploy-dev:
-    name: Deploy the dev environment
-    if: vars.AZURE_FOUNDATION_READY == 'true'
+        """  deploy-ci:
+    name: Deploy the ci environment
+    if: ${{ !cancelled() && needs.validate.result == 'success' && vars.AZURE_FOUNDATION_READY == 'true' }}
     needs: [validate]
     permissions:
       id-token: write
       contents: read
     uses: ./.github/workflows/deploy-environment.yml
     with:
-      environment: dev
-      tfvars-file: dev.tfvars
+      environment: ci
+      tfvars-file: ci.tfvars
       ephemeral-id: ""
 """
     )
-    gates.append("deploy-dev")
+    gates.append("deploy-ci")
 
-    parts.append(render_ci_complete_job(gates))
+    parts.append(render_ci_complete_job(gates, ".github/workflows/ci.yml"))
 
     return "\n".join(part.rstrip("\n") for part in parts) + "\n"
 
@@ -1840,10 +1901,15 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: prod
+  cancel-in-progress: false
+
 jobs:
 {render_validate_job(terraform_version, [])}
   deploy-prod:
     name: Deploy the production environment
+    if: ${{{{ !cancelled() && needs.validate.result == 'success' }}}}
     needs: [validate]
     permissions:
       id-token: write
@@ -1867,9 +1933,10 @@ permissions:
   contents: read
 
 jobs:
-{render_compute_ephemeral_id_job("compute-preview-id")}
+{render_compute_ephemeral_id_job("compute-preview-id", ".github/workflows/pr-closed.yml")}
   destroy-preview:
     name: Destroy the preview instance
+    if: ${{{{ !cancelled() && needs.compute-preview-id.result == 'success' && contains(github.event.pull_request.labels.*.name, 'deploy-preview') && github.event.pull_request.head.repo.full_name == github.repository }}}}
     needs: [compute-preview-id]
     permissions:
       id-token: write
@@ -1877,7 +1944,7 @@ jobs:
     uses: ./.github/workflows/destroy-preview.yml
     with:
       ephemeral-id: ${{{{ needs.compute-preview-id.outputs.ephemeral-id }}}}
-      tfvars-file: dev.tfvars
+      tfvars-file: ci.tfvars
 """
 
 
