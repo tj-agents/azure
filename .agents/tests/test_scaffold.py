@@ -33,7 +33,7 @@ EMPTY_WORKLOADS_FILES = {
     "infra/.gitignore",
     "infra/README.md",
     "infra/app.json",
-    "infra/env/dev.tfvars",
+    "infra/env/ci.tfvars",
     "infra/env/prod.tfvars",
     "infra/foundation/backend.tf",
     "infra/foundation/budget.tf",
@@ -697,7 +697,7 @@ class IntoConflictTests(unittest.TestCase):
             shutil.rmtree(root / "infra" / "instance")
             shutil.rmtree(root / ".github")
             (root / "infra/README.md").unlink()
-            (root / "infra/env/dev.tfvars").unlink()
+            (root / "infra/env/ci.tfvars").unlink()
             (root / "infra/env/prod.tfvars").unlink()
             (root / "infra/.gitignore").unlink()
             (root / ".scaffold.azure.json").unlink()
@@ -925,8 +925,8 @@ class BudgetTests(unittest.TestCase):
             self.assertIn('variable "budget_amount"', variables_tf)
             self.assertIn('variable "budget_start_date"', variables_tf)
             self.assertIn('variable "budget_alert_emails"', variables_tf)
-            dev_tfvars = (root / "infra/env/dev.tfvars").read_text(encoding="utf-8")
-            self.assertIn("budget_start_date", dev_tfvars)
+            ci_tfvars = (root / "infra/env/ci.tfvars").read_text(encoding="utf-8")
+            self.assertIn("budget_start_date", ci_tfvars)
 
 
 SHA_REF_PATTERN = re.compile(r"uses:\s*([^\s@]+)@([0-9a-f]{40})\s*#\s*(v[0-9][\w.()\- ]*)")
@@ -1239,15 +1239,16 @@ class GeneratedWorkflowConformanceTests(unittest.TestCase):
                 self.assertIn("ci-complete:", text)
                 self.assertIn("if: always()", text)
 
-    def test_ephemeral_id_is_truncated_to_six_characters(self) -> None:
+    def test_ephemeral_id_is_not_truncated(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = new_project(temporary)
             write_profile(root, {"schema_version": 1, "name": "demo", "workloads": []})
             code, _, err = run(["new", "--into", str(root), "--no-input"])
             self.assertEqual(0, code, err)
             pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
-            self.assertIn('digits="${digits: -4}"', pr_yml)
-            self.assertIn('echo "ephemeral-id=pr${digits}"', pr_yml)
+            self.assertNotIn(": -4", pr_yml)
+            self.assertIn('id="pr$digits"', pr_yml)
+            self.assertIn("::error file=.github/workflows/pr.yml::", pr_yml)
 
     def test_preview_state_key_uses_pr_instance_suffix(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1269,6 +1270,229 @@ class GeneratedWorkflowConformanceTests(unittest.TestCase):
             dependabot = (root / ".github/dependabot.yml").read_text(encoding="utf-8")
             self.assertIn("package-ecosystem: github-actions", dependabot)
             self.assertIn("interval: weekly", dependabot)
+
+
+def find_working_bash() -> str | None:
+    candidates = [shutil.which("bash")]
+    if os.name == "nt":
+        candidates += [
+            r"C:\Program Files\Git\usr\bin\bash.exe",
+            r"C:\Program Files\Git\bin\bash.exe",
+        ]
+    for candidate in candidates:
+        if not candidate or not Path(candidate).is_file():
+            continue
+        try:
+            result = subprocess.run([candidate, "-c", "echo ok"], capture_output=True, text=True, timeout=10)
+        except OSError:
+            continue
+        if result.returncode == 0 and result.stdout.strip() == "ok":
+            return candidate
+    return None
+
+
+WORKING_BASH = find_working_bash()
+
+
+def extract_run_block(text: str, step_name: str) -> str:
+    marker = f"- name: {step_name}\n"
+    start = text.index(marker)
+    run_marker = "run: |\n"
+    run_start = text.index(run_marker, start) + len(run_marker)
+    lines = text[run_start:].splitlines()
+    indent = len(lines[0]) - len(lines[0].lstrip(" "))
+    body: list[str] = []
+    for line in lines:
+        if line.strip() == "":
+            body.append("")
+            continue
+        if len(line) - len(line.lstrip(" ")) < indent:
+            break
+        body.append(line[indent:])
+    return "\n".join(body)
+
+
+class ErrorsAndDomainDesignTests(unittest.TestCase):
+    def generated(self, profile: dict | None = None, *sets: str) -> Path:
+        self._temporary = tempfile.TemporaryDirectory()
+        root = new_project(self._temporary.name)
+        write_profile(root, profile or {"schema_version": 1, "name": "demo", "workloads": []})
+        args = ["new", "--into", str(root), "--no-input"]
+        for item in sets:
+            args += ["--set", item]
+        code, _, err = run(args)
+        self.assertEqual(0, code, err)
+        return root
+
+    def tearDown(self) -> None:
+        temporary = getattr(self, "_temporary", None)
+        if temporary is not None:
+            temporary.cleanup()
+
+    def test_pr_workflow_has_the_verification_concurrency_group(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            "concurrency:\n  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}\n"
+            "  cancel-in-progress: true",
+            pr_yml,
+        )
+        self.assertIn("types: [opened, synchronize, reopened, labeled]", pr_yml)
+
+    def test_ci_and_prod_use_fixed_concurrency_groups(self) -> None:
+        root = self.generated()
+        ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("concurrency:\n  group: ci\n  cancel-in-progress: false", ci_yml)
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn("concurrency:\n  group: prod\n  cancel-in-progress: false", prod_yml)
+
+    def test_preview_apply_and_destroy_share_the_same_concurrency_group(self) -> None:
+        root = self.generated()
+        deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+        self.assertIn("group: ${{ inputs.ephemeral-id != '' && format('preview-{0}', inputs.ephemeral-id)", deploy_environment)
+        destroy_preview = (root / ".github/workflows/destroy-preview.yml").read_text(encoding="utf-8")
+        self.assertIn("group: preview-${{ inputs.ephemeral-id }}", destroy_preview)
+
+    def test_break_preview_lock_job_runs_only_when_cancelled(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertIn("break-preview-lock:", pr_yml)
+        self.assertIn(
+            "if: ${{ cancelled() && github.event.pull_request.head.repo.full_name == github.repository }}", pr_yml
+        )
+        self.assertIn("az storage blob lease break", pr_yml)
+        self.assertIn("--auth-mode login", pr_yml)
+        self.assertIn("id-token: write", pr_yml.split("break-preview-lock:")[1].split("steps:")[0])
+
+    def test_every_runs_on_job_sets_timeout_minutes(self) -> None:
+        root = self.generated(SANDBOX_PROFILE)
+        for path in sorted((root / ".github/workflows").glob("*.yml")):
+            text = path.read_text(encoding="utf-8")
+            jobs_text = text.split("\njobs:\n", 1)[1]
+            jobs = re.split(r"\n  (?=[a-z][a-z0-9-]*:)", "\n" + jobs_text)
+            for job in jobs:
+                if not job.strip():
+                    continue
+                if re.search(r"\n {4}uses: \./\.github/workflows/", job):
+                    continue
+                self.assertIn("timeout-minutes:", job, f"{path}: {job.splitlines()[0]}")
+
+    def test_deploy_dependent_jobs_use_cancelled_and_result_pattern(self) -> None:
+        root = self.generated()
+        ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("if: ${{ !cancelled() && needs.validate.result == 'success' && vars.AZURE_FOUNDATION_READY == 'true' }}", ci_yml)
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn("if: ${{ !cancelled() && needs.validate.result == 'success' }}", prod_yml)
+        pr_closed = (root / ".github/workflows/pr-closed.yml").read_text(encoding="utf-8")
+        self.assertIn("!cancelled() && needs.compute-preview-id.result == 'success'", pr_closed)
+
+    def test_annotations_use_error_file_format(self) -> None:
+        root = self.generated()
+        for name in ("pr.yml", "ci.yml"):
+            text = (root / ".github/workflows" / name).read_text(encoding="utf-8")
+            self.assertIn(f"::error file=.github/workflows/{name}::", text)
+
+    def test_environments_are_ci_preview_prod(self) -> None:
+        root = self.generated()
+        ci_yml = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: ci", ci_yml)
+        deploy_environment = (root / ".github/workflows/deploy-environment.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: ${{ inputs.environment }}", deploy_environment)
+        destroy_preview = (root / ".github/workflows/destroy-preview.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: preview", destroy_preview)
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: preview", pr_yml)
+        prod_yml = (root / ".github/workflows/prod.yml").read_text(encoding="utf-8")
+        self.assertIn("environment: prod", prod_yml)
+
+    def test_no_dev_remnant_names_the_old_environment(self) -> None:
+        root = self.generated(SANDBOX_PROFILE)
+        self.assertTrue((root / "infra/env/ci.tfvars").is_file())
+        self.assertFalse((root / "infra/env/dev.tfvars").exists())
+        ci_tfvars = (root / "infra/env/ci.tfvars").read_text(encoding="utf-8")
+        self.assertIn('env    = "ci"', ci_tfvars)
+        for path in (root / ".github").rglob("*.yml"):
+            text = path.read_text(encoding="utf-8").replace("/dev/null", "")
+            self.assertNotRegex(text, r"\bdev\b", path)
+
+    def test_preview_requires_the_deploy_preview_label_and_no_var(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertIn("contains(github.event.pull_request.labels.*.name, 'deploy-preview')", pr_yml)
+        self.assertNotIn("AZURE_PREVIEW_ENABLED", pr_yml)
+        pr_closed = (root / ".github/workflows/pr-closed.yml").read_text(encoding="utf-8")
+        self.assertIn("contains(github.event.pull_request.labels.*.name, 'deploy-preview')", pr_closed)
+        self.assertNotIn("AZURE_PREVIEW_ENABLED", pr_closed)
+
+    def test_fork_safety_check_on_every_signing_in_pr_job(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        self.assertEqual(
+            3, pr_yml.count("github.event.pull_request.head.repo.full_name == github.repository")
+        )
+        pr_closed = (root / ".github/workflows/pr-closed.yml").read_text(encoding="utf-8")
+        self.assertIn("github.event.pull_request.head.repo.full_name == github.repository", pr_closed)
+
+    def test_compute_preview_id_job_has_no_checkout(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        job_text = pr_yml.split("compute-preview-id:")[1].split("\n  deploy-preview:")[0]
+        self.assertNotIn("actions/checkout", job_text)
+
+    def test_hcl_list_escapes_migration_command_items(self) -> None:
+        profile = {
+            "schema_version": 1,
+            "name": "demo",
+            "workloads": [],
+            "database": {
+                "engine": "postgres",
+                "migration": {
+                    "build": {"image": "x"},
+                    "command": ['say "hi"', "back\\slash", "lit${eral"],
+                },
+            },
+        }
+        root = self.generated(profile)
+        migration_tf = (root / "infra/instance/migration.tf").read_text(encoding="utf-8")
+        self.assertIn(r'command = ["say \"hi\"", "back\\slash", "lit$${eral"]', migration_tf)
+
+    @unittest.skipUnless(WORKING_BASH, "a working bash is required to execute the generated ephemeral-id script")
+    def test_ephemeral_id_never_collides_ten_thousand_apart(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        script = extract_run_block(pr_yml, "Compute the ephemeral id")
+        ids = {}
+        for pr_number in (10001, 20001):
+            with tempfile.TemporaryDirectory() as temporary:
+                output_file = Path(temporary) / "output"
+                output_file.write_text("", encoding="utf-8")
+                result = subprocess.run(
+                    [WORKING_BASH, "-c", script],
+                    env={**os.environ, "PR_NUMBER": str(pr_number), "GITHUB_OUTPUT": str(output_file)},
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertIn("exceeds the 6-character limit", result.stderr)
+                ids[pr_number] = f"pr{pr_number}"
+        self.assertNotEqual(ids[10001], ids[20001])
+
+    @unittest.skipUnless(WORKING_BASH, "a working bash is required to execute the generated ephemeral-id script")
+    def test_ephemeral_id_within_budget_succeeds(self) -> None:
+        root = self.generated()
+        pr_yml = (root / ".github/workflows/pr.yml").read_text(encoding="utf-8")
+        script = extract_run_block(pr_yml, "Compute the ephemeral id")
+        with tempfile.TemporaryDirectory() as temporary:
+            output_file = Path(temporary) / "output"
+            output_file.write_text("", encoding="utf-8")
+            result = subprocess.run(
+                [WORKING_BASH, "-c", script],
+                env={**os.environ, "PR_NUMBER": "42", "GITHUB_OUTPUT": str(output_file)},
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual("ephemeral-id=pr42\n", output_file.read_text(encoding="utf-8"))
 
 
 def generate(root: Path, profile: dict, *sets: str) -> Path:
