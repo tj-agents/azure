@@ -2291,28 +2291,115 @@ def created_identity(info: os.stat_result) -> tuple[int, int] | None:
     return info.st_dev, info.st_ino
 
 
-def remove_created_path(path: Path, identity: tuple[int, int] | None, directory: bool = False) -> None:
-    check_output_path(path)
-    try:
-        info = path.lstat()
-    except FileNotFoundError:
-        return
-    if identity is None or created_identity(info) != identity:
-        raise ScaffoldError(f"ownership changed or could not be proved: {path}")
-    if directory:
-        path.rmdir()
-    else:
-        path.unlink()
+def open_windows_directory(path: Path):
+    import ctypes
+    from ctypes import wintypes
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    create.restype = wintypes.HANDLE
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    handle = create(str(path.absolute()), 0x80000000, 0x00000003, None, 3, 0x02200000, None)
+    if handle == ctypes.c_void_p(-1).value or handle is None:
+        raise ctypes.WinError(ctypes.get_last_error())
+
+    def release():
+        if not close(handle):
+            raise ctypes.WinError(ctypes.get_last_error())
+
+    return release
+
+
+class CreatedPath:
+    def __init__(self, path: Path, directory: bool = False):
+        self.path = path
+        self.directory = directory
+        self.identity: tuple[int, int] | None = None
+        self.descriptor: int | None = None
+        self.windows_release = None
+
+    def validate_type(self, info: os.stat_result) -> None:
+        valid_type = stat.S_ISDIR(info.st_mode) if self.directory else stat.S_ISREG(info.st_mode)
+        if not valid_type or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+            raise ScaffoldError(f"created output type changed: {self.path}")
+
+    def pin_file(self, descriptor: int) -> None:
+        self.descriptor = os.dup(descriptor)
+        info = os.fstat(self.descriptor)
+        self.validate_type(info)
+        self.identity = created_identity(info)
+
+    def pin_directory(self) -> None:
+        if os.name == "nt":
+            self.windows_release = open_windows_directory(self.path)
+            check_output_path(self.path)
+            info = self.path.lstat()
+        else:
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+            self.descriptor = os.open(self.path, flags)
+            info = os.fstat(self.descriptor)
+        self.validate_type(info)
+        self.identity = created_identity(info)
+
+    def release(self) -> None:
+        if self.descriptor is not None:
+            descriptor, self.descriptor = self.descriptor, None
+            os.close(descriptor)
+        if self.windows_release is not None:
+            release, self.windows_release = self.windows_release, None
+            release()
+
+    def remove(self) -> None:
+        check_output_path(self.path)
+        try:
+            info = self.path.lstat()
+        except FileNotFoundError:
+            return
+        self.validate_type(info)
+        if self.identity is None or created_identity(info) != self.identity:
+            raise ScaffoldError(f"ownership changed or could not be proved: {self.path}")
+        if self.descriptor is not None:
+            live = os.fstat(self.descriptor)
+            self.validate_type(live)
+            if created_identity(live) != self.identity:
+                raise ScaffoldError(f"ownership reference changed: {self.path}")
+        elif self.windows_release is None:
+            raise ScaffoldError(f"ownership reference is not live: {self.path}")
+        if os.name == "nt":
+            self.release()
+        if self.directory:
+            self.path.rmdir()
+        else:
+            self.path.unlink()
+
+
+def release_created_paths(paths: list[CreatedPath]) -> list[Path]:
+    failed = []
+    for created in reversed(paths):
+        try:
+            created.release()
+        except OSError:
+            failed.append(created.path)
+    return failed
 
 
 def write_project(project: Path, files: dict[str, str], metadata: dict) -> None:
     outputs = dict(files)
     outputs[".scaffold.azure.json"] = json.dumps(metadata, indent=2) + "\n"
-    conflicts = output_conflicts(project, outputs)
+    try:
+        conflicts = output_conflicts(project, outputs)
+    except OSError as error:
+        raise ScaffoldError(f"could not inspect outputs in {project} ({error})") from error
     if conflicts:
         raise ScaffoldError("already exists: " + ", ".join(map(str, conflicts)))
-    created_dirs: list[tuple[Path, tuple[int, int] | None]] = []
-    written: list[tuple[Path, tuple[int, int] | None]] = []
+    created_dirs: list[CreatedPath] = []
+    written: list[CreatedPath] = []
     path = project
     try:
         for relative, content in outputs.items():
@@ -2329,30 +2416,33 @@ def write_project(project: Path, files: dict[str, str], metadata: dict) -> None:
                         if not directory.is_dir():
                             raise ScaffoldError(f"output ancestor is not a directory: {directory}")
                     else:
-                        created_dirs.append((directory, None))
-                        created_dirs[-1] = directory, created_identity(directory.lstat())
+                        created = CreatedPath(directory, directory=True)
+                        created_dirs.append(created)
+                        created.pin_directory()
                 else:
                     if not stat.S_ISDIR(info.st_mode):
                         raise ScaffoldError(f"output ancestor is not a directory: {directory}")
             check_output_path(path)
             with path.open("xb") as handle:
-                written.append((path, None))
-                written[-1] = path, created_identity(os.fstat(handle.fileno()))
+                created = CreatedPath(path)
+                written.append(created)
+                created.pin_file(handle.fileno())
                 handle.write(content.encode("utf-8"))
     except Exception as error:
         retained: list[Path] = []
-        for done, identity in reversed(written):
+        for created in [*reversed(written), *reversed(created_dirs)]:
             try:
-                remove_created_path(done, identity)
+                created.remove()
             except (OSError, ScaffoldError):
-                retained.append(done)
-        for directory, identity in reversed(created_dirs):
-            try:
-                remove_created_path(directory, identity, directory=True)
-            except (OSError, ScaffoldError):
-                retained.append(directory)
+                retained.append(created.path)
+        failed_releases = release_created_paths([*created_dirs, *written])
         detail = f"; retained paths: {', '.join(map(str, retained))}" if retained else ""
+        if failed_releases:
+            detail += f"; could not release ownership references: {', '.join(map(str, failed_releases))}"
         raise ScaffoldError(f"could not write {path} ({error}); rolled back newly created outputs{detail}") from error
+    failed_releases = release_created_paths([*created_dirs, *written])
+    if failed_releases:
+        raise ScaffoldError(f"created outputs but could not release ownership references: {', '.join(map(str, failed_releases))}")
 
 
 def resolve_profile_path(into: Path, profile_arg: Path | None) -> Path:
