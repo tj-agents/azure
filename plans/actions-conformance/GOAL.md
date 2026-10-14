@@ -446,3 +446,58 @@ Current bounded branchFix/ScaffoldInterruptionRelease starts from fetcheddefd414
 ### B004 source acceptance - 2026-10-14
 
 Parent inspected the complete source/test delta and accepted129 authored changed lines (script17/6, tests106/0); generated copies excluded. Finally attempts all recorded-reference releases, per-invocation error state preserves escaping BaseException identity over release errors; first new non-OSError success-release error propagates after remaining attempts. Azure's existing broad Exception rollback/wrapping remains. Three new unique regression methods cover write/final-close interruption, release errors/continued attempts, actual close/rename, caller actively handling another exception and RuntimeError/ValueError wrapped rollback. After removing identical duplicate test insertions caused by ambiguous edit-tool responses, final35 focused tests ran successfully with7 existing platform/privilege skips.237-file generation/freshness, all5 Python3.9 AST/definition uniqueness, mirror parity and whitespace pass; all nontransaction AST and4 representative pure plans matchdefd414. Local WindowsApps pwsh returned access denied before launch; equivalent owned Python generator/check succeeded. Writer stopped all sessions/handles and relinquished lease. Next: private audit/checkpoint, fresh immutable independent correctness/filesystem-security review and exact-head full two-OS/Terraform/lint/host CI; then merge/cleanup before provider composition/B002. No renderer/workflow/provider/options/pin change.
+
+## Azure provider composition execution - 2026-10-14
+
+B004 source PR11 merged3bc656b from approvedde912935; all6 exact-head checks in38536132602/38536133100 passed, Linux158 tests/2 Windows-only skips. Resolution-only PR12 merged08bd299 from independently docs-reviewed39972d5 with all6 checks in38537418580/38537418957 green; primary record exact-equal before fast-forward, binding released and own branch/checkout removed. B004 resolved; B002 retains its existing repair owner.
+
+Execution checkout: C:/Users/TommySeery/source/repos/tj-agents/azure/.worktrees/Feature-WorkflowProviderComposition.
+Branch: Feature/WorkflowProviderComposition, base08bd29969ae4aedbfcb801e9157d1783fa8d4e4b. PR: not opened.
+Phase L4 specified implementation: prior accepted provider/immutable-artifact design carried forward; code-level choices are locally testable. One available-model source writer owns canonical Azure scaffold code/resources/tests, related scaffold docs, own CI integration and generated mirrors. Parent owns goal/record edits, scope measurements, commit/audit, immutable independent review and delivery. Source writer does not own Git/forge/PR/review results. No new native session, local C#/Terraform process or cloud invocation.
+
+Accepted composition boundary:
+- Import github-actions pure render(config, repository_files), combine its whole file map with Azure infra in one existing outer transaction. Never call the public writer transaction. Explicit --github-actions-scaffold / GITHUB_ACTIONS_SCAFFOLD locates the writer; workflows=false needs no writer, enabled missing/unusable writer fails before outputs. Published installation/dependency resolution remains gated by Kit release; do not invent a discovery promise or hand-declare package dependencies.
+- Remove Azure-owned generic workflow envelopes, jobs/aggregators, pin catalog, Dependabot and lint templates. Azure supplies structured provider phases/composites only. The shared writer owns the entire workflow set, production release defaults on, literal ci/preview/prod environments, fixed provider readiness vars.AZURE_FOUNDATION_READY == 'true', OIDC, trust/concurrency/live-preview lifecycle and immutable artifact IDs.
+- Profile verify commands map in order to verify.unit.steps; missing or empty becomes an empty verify map, no inferred integration/e2e commands. Repository SDK metadata comes through repository_metadata for '.' plus actual declared roots/ancestors, and prospective overlay wins. No hardcoded language SDK version or command parsing.
+- Provider setup uses catalog names hashicorp/setup-terraform and azure/login, action refs owned by the writer; Azure supplies Terraform version and ARM IDs at consuming step env. Validate fmt/backendless init/validate across foundation and instance. Plan uses real backend/environment vars and diagnostic artifacts, without rebuilding deployment artifact or permitting overwrite.
+- Build once into a versioned manifest, package files and docker-save single-platform image archives, uploaded by the shared writer. Existing build.image pushes the CI registry and resolves local RepoDigests. CI build may converge CI foundation for registry outputs; PR build only reads preprovisioned CI foundation, retaining manual-bootstrap readiness. Prod identity and registry remain distinct, no CI-registry access grants. Deploy validates artifact source/workload/host/digest/path/hash shape before instance apply, loads archives and re-pushes exact content to target registry with digest comparison; no rebuild/cross-environment permissions/mutable-tag deployment. Manifest rejects missing, unexpected, unsafe or mismatched assets.
+- Nonpreview deploy converges its foundation, promotes validated artifact, then applies instance/migration/ServiceBus default-filter removal/package deployment. B002 deployment, migration and serving commands consume actual Terraform resource-name outputs for region/environment/full preview identity; no shortened reconstructed names. Complete prN over6 characters fails rather than truncates. Foundation-only profiles deploy without absent workload artifact.
+- Readiness is bounded and fail-closed for actual serving revision/targets; App Service checks staging before swap and production after swap. Preview destroy checks exact state blob existence before backend init; missing is idempotent, query/auth errors fail, never touch foundation. Recovery checks exact preview lease, absent/unleased is idempotent. Shared writer owns held-lock current PR state/default-branch cleanup.
+
+Acceptance: combined map metadata-overlay/conflict/rollback and missing-writer tests; foundation-only, build-once artifact negative validation and cross-registry promotion stubs; actual names for ci/prod/preview/region/workload/migration; absent state/lease and failed readiness/swap tests. Existing Azure Terraform component behavior/hosts retained. Generated mirrors/freshness/AST uniqueness/Kit/host checks locally; full exact-head two-OS Terraform matrix and composed actionlint/zizmor remote. Own CI checks out github-actions at immutable merged head and explicitly binds its writer. No copied writer resources or pin catalog. Reassess measured atomic caller cutover before freezing; prior expected about1000 generic lines removed plus cloud implementation/tests. A dead preparatory API is not a delivery slice. Independent full native/API and security review precede merge. Next after item0: one dotnet Web API/Roslyn boilerplate0b, then all original remaining scope.
+
+### Provider composition candidate acceptance - 2026-10-14
+
+Exclusive source writer completed and relinquished its lease, with all exec handles closed. Parent
+inspected the complete combined-map and cloud-runtime boundary, actual Terraform resource targets,
+manifest/source/host/path/hash/digest validation, promoted serving revision/image, raw Flex ARM state,
+compiled OneDeploy zip path, staging/swap/postswap checks, exact preview blob/lease arguments and
+idempotent Service Bus filter removal. Failed plans preserve stdout/stderr diagnostics and stay failed.
+Valid migration/migrator workload IDs remain independent of the reserved database-migration asset.
+
+Final parent-recorded real-writer suite ran168 tests with12 existing skips:5 disabled local Terraform
+gates and7 Windows privilege/platform cases; zero missing-binding skips. Shared artifact:
+.git/agent-workflow/runs/standards-azure-provider-20261014/artifacts/65be84906ad1e9ed-provider-real-writer-suite.log.
+Writer focused46 tests passed with no skips; isolated168-test suite has19 skips, adding exactly7
+explicit real-writer integrations for actual workflow graph, SDK metadata, prod-release, generated
+inventory and ordered verify behavior. Azure profile/infra/transaction/runtime tests remain active.
+240-file freshness, seven authored Python3.9 AST/definition uniqueness, three generated mirror sets,
+four composed plans and whitespace pass. Parent frozen Kit1.2.1 passed, artifact769596a639400b1c.
+No live cloud, local Terraform or application build; authoritative full both-OS matrix remains remote.
+
+Measured authored change:8 source/docs/test/CI paths,+1422/-1936 lines; generated15 paths,+1884/-3384.
+Retain one atomic caller cutover: generic Azure workflow deletion, pure shared map consumption, provider
+phases, output-name plumbing and immutable cloud assets must land together to preserve a usable complete
+scaffold. Shared writer already shipped separately; splitting this caller would publish dead glue or
+an incomplete deployment boundary. Unrelated0b/identity/dependency/dispatcher/Terraform/Core source is
+absent. One-sitting full review covers fewer than300 paths and10k diff lines; native-general, Azure/API
+contract correctness and L2 privileged-workflow/artifact security are independently fresh. Parent alone
+owns findings/judgment. Next: staged private audit and focused checkpoint, one initial synchronized
+immutable freeze, draft PR and exact-head CI, review/repair/delta gates, authorized merge and cleanup;
+then B002 resolution record as required,0b and all original remaining scope.
+
+The installed skills recorder cannot resolve external lifecycle bodies from this plugin-only repository
+(expected .agents/skills/plan-execution/SKILL.md is absent). No duplicate skill was copied into Azure.
+Existing installed plan-execution/review-lifecycle/lanes bodies were read, their identities retained by
+the parent, and the same standalone scope/review gates apply; captured Workflow v2 freeze/delivery
+operations remain available. This capability mismatch does not weaken candidate or delivery checks.

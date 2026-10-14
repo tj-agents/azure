@@ -42,31 +42,30 @@ ignore `.terraform.lock.hcl`, which `azure:build` requires to be committed.
 
 Create three GitHub environments: `ci` (the shared non-production environment `ci.yml` deploys), `preview`
 (a pull request's ephemeral instance) and `prod`. Give `preview` and `prod` protection rules in repository
-settings — at minimum, restrict `prod` to deployments from tags matching `v[0-9]+.[0-9]+.[0-9]+`; a preview
+settings â€” at minimum, restrict `prod` to deployments from tags matching `v[0-9]+.[0-9]+.[0-9]+`; a preview
 or production deploy should not run unreviewed.
 
 `prod.yml` triggers only on a semver tag push (`v[0-9]+.[0-9]+.[0-9]+`) and its first job,
 `assert-release-commit`, fails the run unless that tag's commit is the head of the latest successful
-`ci.yml` run on `main` — a release always ships what CI last verified, never an untested commit.
+`ci.yml` run on `main` â€” a release always ships what CI last verified, never an untested commit.
 
 `pr.yml`, `ci.yml`, `prod.yml`, `pr-closed.yml`, `deploy-environment.yml` and `destroy-preview.yml` read
 these GitHub Actions variables, set once the foundation has deployed:
 
-- `AZURE_FOUNDATION_READY` — `"true"` once the state account above exists; gates `plan`, `deploy-ci` and
-  `deploy-preview`.
-- `AZURE_CLIENT_ID` — the deploy identity's client id (`terraform output -raw deploy_identity_client_id`).
-- `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` — the target tenant and subscription.
-- `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT` — the values used in the migration above.
+- `AZURE_FOUNDATION_READY` â€” `"true"` once the state account above exists; gates PR plan, build, preview and recovery. CI can converge its bootstrapped foundation.
+- `AZURE_CLIENT_ID` â€” the deploy identity's client id (`terraform output -raw deploy_identity_client_id`).
+- `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID` â€” the target tenant and subscription.
+- `TFSTATE_RESOURCE_GROUP`, `TFSTATE_STORAGE_ACCOUNT` â€” the values used in the migration above.
 
 Set these on the `ci` environment, and again on `prod` with that environment's own subscription and storage
 account. A PR's preview instance deploys and destroys through the `preview` environment's values, which
-should match `ci`'s, since a preview reuses `ci`'s foundation — only its `instance` root is ephemeral. The
+should match `ci`'s, since a preview reuses `ci`'s foundation â€” only its `instance` root is ephemeral. The
 `ci` foundation's deploy identity carries a federated credential for both the `environment:ci` and
 `environment:preview` OIDC subjects, so the same identity can sign in under either GitHub environment.
 
 A pull request's preview is opt-in: add the `deploy-preview` label to the PR to deploy it, and `pr-closed.yml`
-destroys it on close only if it carried that label. Applying a label requires the repository's `triage` role,
-which is what makes the label a safe trust gate — a pull request from a fork can't grant itself a preview
+checks for and destroys it on close, including after that label has been removed. Applying a label requires the repository's `triage` role,
+which is what makes the label a safe trust gate â€” a pull request from a fork can't grant itself a preview
 deploy by labelling its own PR. `plan`, `deploy-preview`, the state-lock release and `destroy-preview` also
 check `github.event.pull_request.head.repo.full_name == github.repository` as defense in depth.
 
@@ -89,36 +88,45 @@ creates each non-`public` one and grants every workload identity the same privil
 An App Service workload's `sticky` list names its own effective settings that should stay with the production
 slot across a swap, instead of swapping along with the rest of `app_settings`.
 
-## The deploy workflow
+## Build once and deploy the verified artifact
 
-`deploy-environment.yml` is a reusable workflow (`workflow_call`) that `ci.yml` (environment `ci`),
-`prod.yml` (environment `prod`, `prod.tfvars`) and `pr.yml`'s preview job (environment `preview`, ephemeral)
-all call. It applies foundation unless deploying a preview — a preview reuses `ci`'s foundation — then for
-every workload in the profile runs its `build.image` or `build.package` command — whichever its host
-needs — through the `build-workload` composite action, with `REGISTRY` (the registry login server),
-`REPOSITORY` (`<name>-<id>`), `TAG` (the commit sha) and, for an image build,
-`IMAGE=$REGISTRY/$REPOSITORY:$TAG` set in its environment, then resolves the pushed image's digest from
-`docker inspect`'s `RepoDigests` and deploys that — never the mutable `$TAG` reference. The database's
-`migration.build.image`, if any, builds the same way under key `migration`. It then applies the migration
-job and its identity, admin and database, runs the job and waits for it to succeed, applies the full
-instance plan with the built images, deploys each package (Flex Consumption via `az functionapp deploy`,
-then waits for the function app's state to become `Running`; App Service via a staging-slot deploy, a
-readiness wait, a slot swap, then the same readiness wait against production), and waits for each Container
-App's revision to become `Healthy` — a deploy isn't done until the new code is serving, not merely
-deployed, and each wait fails the job with `::error::` if it times out (5 minutes) rather than silently
-continuing. If any workload consumes a topic, it also removes each subscription's `$Default` rule, reading
-the subscription list from a Terraform output rather than inlining it.
+`github-actions:scaffold` owns the workflow graph and action catalog. Azure supplies its provider phases,
+`infra/deployment.json` and `infra/scripts/azure_deploy.py`. The shared writer uploads the build artifact
+once and downloads the same immutable artifact ID for CI, preview and production deployment.
 
-A pull request's preview instance deploys with the full `ephemeral_id=pr<N>` — never truncated, so two PRs
-can never collide on the same preview's state key — through `destroy-preview.yml` using the same id on
-close. The Terraform variable allows up to 6 lowercase alphanumeric characters; a PR number that doesn't fit
-makes the id-computing step fail loudly (`::error::`, naming the limit) rather than deploy under a shortened,
-possibly colliding id. The preview apply and its eventual teardown share one `preview-<id>` concurrency
-group, and a `break-preview-lock` job breaks the state blob's lease over OIDC if a new push cancels an
-in-flight preview apply.
+The build phase runs each selected `build.image` or `build.package` command from the profile. Image
+commands receive `REGISTRY`, `REPOSITORY`, `TAG` and `IMAGE`; they must push `$IMAGE` to the CI registry.
+Azure reads that image's matching `RepoDigests`, records its identity/platform and saves a single-platform
+image archive. Package commands receive `PACKAGE`, the zip path to write. The manifest records source
+commit/run, workload host, safe relative filename and SHA-256 for each asset. The database migration asset
+is `database-migration`, independent of workloads named `migration` or `migrator`.
 
-If the profile has a top-level `verify` list, `pr.yml` and `ci.yml` run each command in a sentence-named
-`verify` job before any Azure job.
+CI builds can converge the CI foundation; PR builds only read the preprovisioned CI foundation. Foundation
+bootstrapping and `AZURE_FOUNDATION_READY` still require the setup above. A foundation-only profile has no
+build artifact.
+
+Deploy validates all manifest source/workload/host/digest/path/hash data before any instance apply. It
+converges foundation for CI or production and reuses CI foundation for a preview. Production loads image
+archives and pushes that exact content to its own registry, checking that the digest is unchanged. It
+needs no CI-registry access and does not rerun build commands. The instance and migration consume only
+target-registry digest references.
+
+Resource commands use Terraform's actual `workload_targets`, `resource_group_name` and
+`migration_job_name` outputs. Migration waits for the exact started execution. Packages deploy to the
+actual Function App or App Service staging slot; App Service must pass staging health before a swap and
+production health afterward. Container Apps must serve the latest active/Running/Healthy revision with
+the promoted image digest, and HTTP workloads must route traffic to it and pass their serving probe.
+Background workloads require the same current revision and image health. Flex Consumption must be Running
+and answer from the actual serving host. Every readiness wait fails after five minutes.
+
+The full `PREVIEW_NUMBER` becomes `pr<N>`; identities beyond six characters fail instead of being
+truncated. Destroy queries that exact state blob before Terraform initialization and is idempotent when
+it is absent. Recovery does nothing for absent/unleased state and breaks only that exact leased blob.
+Query/authentication failures fail the job. Foundation is never destroyed by preview cleanup. The shared
+writer owns the held preview lock, live PR-state checks and cleanup from the current default branch.
+
+Ordered `profile.verify` commands become unit verification steps; an absent or empty list emits no app
+verification suite. SDK setup comes from repository metadata files rather than Azure's config.
 
 ## Offline gate
 
