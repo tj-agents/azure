@@ -363,10 +363,9 @@ it. This slice touches no workflow, so the `github-actions` contracts don't appl
 
 ## Next Steps
 
-1. Repair B001, finish independent review, then open and merge the sticky-settings PR.
-2. Finish and deliver the dotnet snippet-gate branch.
-3. Move the complete workflow set to github-actions; Azure supplies only its own steps.
-4. Collapse dotnet scaffolding to its one Web API shape; slice E is folded into item 0b of the canonical handoff.
+1. Repair B004 unconditional ownership-reference release on interruption; independent review, exact-head CI and merge.
+2. Compose the github-actions pure renderer; Azure owns its provider steps and B002 uses actual Terraform resource outputs.
+3. Dotnet one-shape0b, then identity/dependencies/typed dispatcher/Terraform/Core in the canonical handoff order.
 
 ## Codex pickup - 2026-10-13
 
@@ -437,3 +436,13 @@ and host gates, authorized merge/cleanup, and the Azure provider composition/B00
 
 
 2026-10-14 parent accepts FT1/2 live-ownership repair after source and complete test-delta inspection. Focused32 tests pass,7 Windows privilege/POSIX-platform skips; generator237 outputs/freshness and diff checks pass. Authored full-base change is source241 plus tests792 lines =1033; generated mirrors excluded. Reassessment retains one atomic B003 transaction slice: exclusive creation, live identity acquisition, stream-close failure handling and owned rollback must land together; splitting the lifetime correction would publish the reviewed unsafe cleanup. No provider/composition/B002 changes accumulated. Fresh incremental review and exact-head CI precede merge. Separately, source-owner GHA B001 record-only PR4 merged d93b6ce from e814659 after ordinary docs review and all5 exact-head checks; primary record retained/verified, docs checkout removed. Its public-new rollback repair remains bounded item0 follow-up, independent of Azure's pure renderer consumption.
+
+### B004 interruption prerequisite - 2026-10-14
+
+B003 PR9 mergedf05693ec from approved9e90c28, all6 exact-head checks passed and its checkout/binding cleaned. GHA public-writer B001/WT-1 PR5 merged5dbe9cc09799911ed896c2e35007167d41d2d853 from approved4497cf7 after fresh correctness/security review, frozenKit/host checks and all5 replacement checks; Linux100 tests/2 Windows-only skips. Primary Azure B004 record-only PR10 mergeddefd414e383b3190a3c8540faf36fe81eec8947f from independently approvedfb7207c with all6 checks green; primary record verified before safe fast-forward and checkout cleanup.
+
+Current bounded branchFix/ScaffoldInterruptionRelease starts from fetcheddefd414. Parent temporary-only Azure probe confirms KeyboardInterrupt bypasses Exception handler/success-release and leaves2 live references in an importing process; probe explicitly released both. Repair acquired-reference release on every exit while preserving existing Azure Exception wrapping/rollback, original BaseException identity, usual release diagnostics and completed outputs. No GHA renderer/provider/options/pins/workflow changes; the accepted GHA repair is a source-design reference, not a runtime dependency. One exclusive L4 writer owns canonical script/tests/three generated mirrors; parent owns record/goal/commit/review/delivery. Expected under200 authored lines, measured before freeze; focused WriteTransactionTests and generation/freshness/AST checks locally, full Linux/Windows/Terraform/lint/host gates remote. No local Terraform/C# build or live Azure/new native session. Next: bounded implementation/verification, audit/checkpoint, fresh immutable independent correctness/security review and exact-head CI, merge/cleanup, then provider composition/B002 and0b/rest.
+
+### B004 source acceptance - 2026-10-14
+
+Parent inspected the complete source/test delta and accepted129 authored changed lines (script17/6, tests106/0); generated copies excluded. Finally attempts all recorded-reference releases, per-invocation error state preserves escaping BaseException identity over release errors; first new non-OSError success-release error propagates after remaining attempts. Azure's existing broad Exception rollback/wrapping remains. Three new unique regression methods cover write/final-close interruption, release errors/continued attempts, actual close/rename, caller actively handling another exception and RuntimeError/ValueError wrapped rollback. After removing identical duplicate test insertions caused by ambiguous edit-tool responses, final35 focused tests ran successfully with7 existing platform/privilege skips.237-file generation/freshness, all5 Python3.9 AST/definition uniqueness, mirror parity and whitespace pass; all nontransaction AST and4 representative pure plans matchdefd414. Local WindowsApps pwsh returned access denied before launch; equivalent owned Python generator/check succeeded. Writer stopped all sessions/handles and relinquished lease. Next: private audit/checkpoint, fresh immutable independent correctness/filesystem-security review and exact-head full two-OS/Terraform/lint/host CI; then merge/cleanup before provider composition/B002. No renderer/workflow/provider/options/pin change.
