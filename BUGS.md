@@ -31,8 +31,10 @@
 - **Observed/reported:** 2026-10-13. At main881ac901118a953b6d6ef0d5651f483e02823bf8, `cmd_new` permits an external profile identical to an existing `infra/app.json`, but retains that profile in the output map. `write_project` overwrites it and includes it in rollback. A temporary-only injected final metadata-write failure returns1 and deletes the previously existing profile. Cause confirmed in `scripts/scaffold.py:2259-2282,2337-2363` under the canonical scaffold skill.
 - **Impact and priority:** P1; a failed scaffold operation can remove a caller-owned input file, violating preservation/rollback guarantees. The reproduction touched only a disposable temporary directory.
 - **Source owner:** `tj-agents/azure`, scaffold outer write transaction.
-- **State:** in-progress
-- **Repair link:** `plans/actions-conformance/GOAL.md`; the existing standards-finish owner, item0 Azure workflow composition after the shared writer merges.
-- **Next action:** omit identical existing profiles from the combined write set and use exclusive creation with safe conflict/redirect checks and rollback limited to new outputs.
+- **State:** resolved
+- **Repair link:** `plans/actions-conformance/GOAL.md`; branch `Fix/ScaffoldFileTransaction`, the existing standards-finish owner, item0 transaction prerequisite before Azure workflow composition.
+- **Next action:** complete independent review and exact-head CI, then merge the transaction prerequisite before Azure workflow composition.
 - **Resolution condition:** external identical profiles and existing files survive injected write failures byte-for-byte; combined output conflicts, redirects and rollback tests pass without cloud execution.
 - **Verification evidence:** temporary-directory pure Python reproduction patches only the final metadata write to raise OSError; scaffold exits1 and the existing profile is absent. No repository source or cloud resources were changed by the reproduction.
+
+- **Repair verification:** identical existing external profiles are omitted from outputs and preserve bytes/mtime; exclusive creation and lstat redirect checks precede writes. Rollback compares created file/directory identity and retains replacements or unprovable paths. Twenty focused transaction tests passed (five Windows symlink-privilege skips), including actual junction rejection and injected partial/metadata failures; generated freshness and pinned Kit conformance passed. Full exact-head two-OS CI remains required. Portable path APIs do not guarantee atomic protection from hostile substitution between ownership checks and deletion.
