@@ -2379,13 +2379,18 @@ class CreatedPath:
             self.path.unlink()
 
 
-def release_created_paths(paths: list[CreatedPath]) -> list[Path]:
+def release_created_paths(paths: list[CreatedPath], preserve_error: bool = False) -> list[Path]:
     failed = []
+    release_error = None
     for created in reversed(paths):
         try:
             created.release()
-        except OSError:
+        except BaseException as error:
             failed.append(created.path)
+            if not isinstance(error, OSError) and release_error is None:
+                release_error = error
+    if release_error is not None and not preserve_error:
+        raise release_error
     return failed
 
 
@@ -2401,6 +2406,8 @@ def write_project(project: Path, files: dict[str, str], metadata: dict) -> None:
     created_dirs: list[CreatedPath] = []
     written: list[CreatedPath] = []
     path = project
+    write_error = None
+    retained: list[Path] = []
     try:
         for relative, content in outputs.items():
             path = project / relative
@@ -2429,18 +2436,22 @@ def write_project(project: Path, files: dict[str, str], metadata: dict) -> None:
                 created.pin_file(handle.fileno())
                 handle.write(content.encode("utf-8"))
     except Exception as error:
-        retained: list[Path] = []
+        write_error = error
         for created in [*reversed(written), *reversed(created_dirs)]:
             try:
                 created.remove()
             except (OSError, ScaffoldError):
                 retained.append(created.path)
-        failed_releases = release_created_paths([*created_dirs, *written])
+    except BaseException as error:
+        write_error = error
+        raise
+    finally:
+        failed_releases = release_created_paths([*created_dirs, *written], preserve_error=write_error is not None)
+    if write_error is not None:
         detail = f"; retained paths: {', '.join(map(str, retained))}" if retained else ""
         if failed_releases:
             detail += f"; could not release ownership references: {', '.join(map(str, failed_releases))}"
-        raise ScaffoldError(f"could not write {path} ({error}); rolled back newly created outputs{detail}") from error
-    failed_releases = release_created_paths([*created_dirs, *written])
+        raise ScaffoldError(f"could not write {path} ({write_error}); rolled back newly created outputs{detail}") from write_error
     if failed_releases:
         raise ScaffoldError(f"created outputs but could not release ownership references: {', '.join(map(str, failed_releases))}")
 
