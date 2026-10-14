@@ -117,7 +117,10 @@ actual Function App or App Service staging slot; App Service must pass staging h
 production health afterward. Container Apps must serve the latest active/Running/Healthy revision with
 the promoted image digest, and HTTP workloads must route traffic to it and pass their serving probe.
 Background workloads require the same current revision and image health. Flex Consumption must be Running
-and answer from the actual serving host. Every readiness wait fails after five minutes.
+and answer from the actual serving host. Ingress requests can wake zero-scale revisions; current ready
+revision, promoted digest, traffic and health are rechecked after a successful request. Readiness waits
+use a monotonic five-minute budget including probe time, with command timeouts and sleeps capped by the
+remaining budget.
 
 The full `PREVIEW_NUMBER` becomes `pr<N>`; identities beyond six characters fail instead of being
 truncated. Destroy queries that exact state blob before Terraform initialization and is idempotent when

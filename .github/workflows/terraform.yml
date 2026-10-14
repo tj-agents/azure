@@ -28,7 +28,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: tj-agents/github-actions
-          ref: e00dfd03771cf9416dbe9136e59c221c6feea43e
+          ref: 432ba0338e21e194f398f1a8bcec876422d2197b
           path: .workflow-provider
           persist-credentials: false
       - name: Bind the shared workflow writer
@@ -61,7 +61,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: tj-agents/github-actions
-          ref: e00dfd03771cf9416dbe9136e59c221c6feea43e
+          ref: 432ba0338e21e194f398f1a8bcec876422d2197b
           path: .workflow-provider
           persist-credentials: false
       - name: Bind the shared workflow writer

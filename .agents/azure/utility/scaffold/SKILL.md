@@ -77,6 +77,9 @@ Options: `http_host` (`container-apps` default, `app-service`), `background_host
   - `kind` is `http`, `background` or `functions`; it selects a host through the matching `*_host` option.
   - `http` requires an integer `port` (1-65535) and `probes.liveness` / `probes.readiness` URL paths, which start
     with `/` and use only letters, digits and `._~/?=&%-`.
+  - When supplied, `probes` must be an object. Optional Function or background `probes.readiness` must
+    use the same safe URL-path grammar; an absent readiness path defaults to `/`. Background serving
+    verification remains a revision/image health check without an HTTP request.
   - `functions` requires `runtime.name` and `runtime.version`. An `http` workload on `app-service`
     requires `runtime`, whose `name` is one of `dotnet`, `node`, `python`, `java`.
   - `build.image` is required when the workload's host is Container Apps; `build.package` is required on
@@ -194,7 +197,10 @@ Azure's phases perform:
 - `readiness`: bounded checks of the current latest Container Apps revision, its promoted image digest,
   active/Running/Healthy state and serving traffic/host where applicable. Background workloads require
   the same current revision and image health. Flex Consumption requires Running plus its serving host.
-  App Service checks staging before a swap and its production host afterward. Every timeout fails.
+  App Service checks staging before a swap and its production host afterward. An ingress request can wake
+  a zero-scale revision; its current ready revision, digest, routed traffic and health are rechecked after
+  a successful request. Each wait uses a monotonic five-minute budget including probe time, with command
+  timeouts and sleeps capped by the remaining budget. Every timeout fails.
 - `destroy` and `recover`: check the exact preview state blob before backend initialization or lease
   operations. Absent state and unleased blobs are idempotent; query/authentication errors fail. Teardown
   destroys only the instance root, never foundation.

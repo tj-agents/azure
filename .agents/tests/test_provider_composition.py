@@ -201,6 +201,40 @@ class CompositionUnitTests(unittest.TestCase):
         self.assertEqual("migration", config["assets"]["database-migration"]["kind"])
         self.assertIn('lookup(var.images, "database-migration",', scaffold.render_migration_tf(profile))
 
+    def test_optional_function_and_background_probes_reject_malformed_input_before_outputs(self):
+        invalid = (None, [], "probe", 42, {"readiness": None}, {"readiness": 42}, {"readiness": "/$(bad)"}, {"readiness": "https://other/"})
+        for kind, sets in (("functions", []), ("functions", ["functions_host=container-apps"]), ("background", [])):
+            for probes in invalid:
+                with self.subTest(kind=kind, sets=sets, probes=probes), tempfile.TemporaryDirectory() as temporary:
+                    project = Path(temporary)
+                    (project / "infra").mkdir()
+                    workload = {"id": "worker", "kind": kind, "build": {"image": "echo image", "package": "echo package"}, "probes": probes}
+                    if kind == "functions": workload["runtime"] = {"name": "dotnet-isolated", "version": "10.0"}
+                    profile = {"schema_version": 1, "name": "demo", "workloads": [workload]}
+                    source = project / "infra/app.json"
+                    source.write_text(json.dumps(profile))
+                    argv = ["new", "--into", str(project), "--no-input"]
+                    for value in sets: argv.extend(["--set", value])
+                    with patch.object(scaffold, "load_workflow_writer", side_effect=AssertionError("no writer for invalid profile")), contextlib.redirect_stderr(io.StringIO()) as error:
+                        self.assertEqual(2, scaffold.main(argv))
+                    self.assertIn("profile.workloads[0].probes", error.getvalue())
+                    self.assertEqual([source], [path for path in project.rglob("*") if path.is_file()])
+
+    def test_optional_probes_preserve_omitted_and_empty_defaults_and_valid_readiness(self):
+        values = scaffold.resolve(scaffold.load_spec(), None, None, [])[0]
+        for kind in ("functions", "background"):
+            for probes, expected in ((None, "/"), ({}, "/"), ({"readiness": "/health/function?ready=true"}, "/health/function?ready=true")):
+                with self.subTest(kind=kind, probes=probes), tempfile.TemporaryDirectory() as temporary:
+                    workload = {"id": "worker", "kind": kind, "build": {"image": "echo image", "package": "echo package"}}
+                    if kind == "functions": workload["runtime"] = {"name": "dotnet-isolated", "version": "10.0"}
+                    if probes is not None: workload["probes"] = probes
+                    profile = {"schema_version": 1, "name": "demo", "workloads": [workload]}
+                    self.assertEqual([], scaffold.validate_profile(profile, values))
+                    config = scaffold.deployment_config(profile, values, scaffold.compute_derived(profile, values))
+                    path = Path(temporary) / "deployment.json"
+                    path.write_text(json.dumps(config))
+                    self.assertEqual(expected, runtime.load_config(path)["assets"]["worker"]["readiness"])
+
     def test_resource_outputs_reference_actual_resource_attributes(self):
         values = scaffold.resolve(scaffold.load_spec(), None, None, [])[0]
         profile = copy.deepcopy(SANDBOX_PROFILE)
@@ -272,9 +306,16 @@ class RuntimeTests(unittest.TestCase):
         self.commands = patch.object(runtime, "command", side_effect=AssertionError("unstubbed command"))
         self.commands.start()
         self.addCleanup(self.commands.stop)
-        self.sleep = patch.object(runtime.time, "sleep")
+        self.now = 0.0
+        self.monotonic = patch.object(runtime.time, "monotonic", side_effect=lambda: self.now)
+        self.monotonic.start()
+        self.addCleanup(self.monotonic.stop)
+        self.sleep = patch.object(runtime.time, "sleep", side_effect=self.advance)
         self.sleep.start()
         self.addCleanup(self.sleep.stop)
+
+    def advance(self, seconds):
+        self.now += seconds
 
     def test_valid_image_and_package_artifacts(self):
         for host in ("container-apps", "app-service", "flex-consumption"):
@@ -566,6 +607,75 @@ class RuntimeTests(unittest.TestCase):
                             else:
                                 with self.assertRaises(runtime.DeploymentError):
                                     runtime.migration(values)
+
+    def test_wait_deadline_includes_probe_time_and_caps_remaining_sleep(self):
+        count = []
+        def probe():
+            count.append(self.now)
+            self.advance(20)
+            return False
+        with self.assertRaises(runtime.DeploymentError): runtime.wait_for(probe, "not ready")
+        self.assertEqual(300, self.now)
+        self.assertEqual(10, len(count))
+        self.now = 0
+        with self.assertRaises(runtime.DeploymentError): runtime.wait_for(lambda: (self.advance(297) or False), "not ready")
+        self.assertEqual(300, self.now)
+        self.assertIsNone(runtime.WAIT_DEADLINE.get())
+        self.now = 0
+        with self.assertRaises(runtime.DeploymentError): runtime.wait_for(lambda: (self.advance(301) or True), "late ready")
+
+    def test_wait_commands_cap_subprocess_timeouts_and_restore_outside_wait_behavior(self):
+        self.commands.stop()
+        result = subprocess.CompletedProcess(["az"], 0, stdout="", stderr="")
+        def probe():
+            self.advance(285)
+            runtime.command("az", "show")
+            self.advance(10)
+            runtime.command("curl", "probe")
+            return False
+        with patch.object(runtime.subprocess, "run", return_value=result) as process:
+            with self.assertRaises(runtime.DeploymentError): runtime.wait_for(probe, "not ready")
+            self.assertEqual([15, 5], [call.kwargs["timeout"] for call in process.call_args_list])
+            self.assertEqual(300, self.now)
+            runtime.command("bash", "build")
+            self.assertNotIn("timeout", process.call_args.kwargs)
+        timeout = subprocess.TimeoutExpired(["az", "show"], 2)
+        with patch.object(runtime.subprocess, "run", side_effect=timeout), self.assertRaises(subprocess.TimeoutExpired) as caught:
+            runtime.wait_for(lambda: runtime.command("az", "show"), "not ready")
+        self.assertIs(timeout, caught.exception)
+        self.assertIsNone(runtime.WAIT_DEADLINE.get())
+
+    def test_subprocess_timeout_is_reported_cleanly_by_runtime_entrypoint(self):
+        timeout = subprocess.TimeoutExpired(["az", "show"], 5)
+        with patch.object(runtime, "load_config", return_value=config_for()), patch.object(runtime, "readiness", side_effect=timeout), contextlib.redirect_stderr(io.StringIO()) as error:
+            self.assertEqual(1, runtime.main(["readiness"]))
+        self.assertIn("::error file=infra/scripts/azure_deploy.py::", error.getvalue())
+        self.assertIn("timed out", error.getvalue())
+        self.assertNotIn("Traceback", error.getvalue())
+
+    def test_ingress_wakes_zero_scale_and_rechecks_current_revision_digest_and_traffic(self):
+        config = config_for()
+        values = {"resource_group_name": "actual-rg", "workload_targets": {"api": {"name": "actual-api", "hostname": "actual.azurecontainerapps.io"}}}
+        for invalid in (None, "image", "revision", "route", "health"):
+            state = {"awake": False, "calls": []}
+            def stub(*args, **kwargs):
+                state["calls"].append(args[:3])
+                if args[0] == "curl":
+                    self.assertEqual("https://actual.azurecontainerapps.io/ready", args[-1])
+                    state["awake"] = True
+                    return "200"
+                self.assertIn("actual-api", args)
+                if args[:3] == ("az", "containerapp", "show"):
+                    revision = "old" if state["awake"] and invalid == "revision" else "new"
+                    traffic = [{"revisionName": "new", "weight": 0 if state["awake"] and invalid == "route" else 100}]
+                    return json.dumps({"properties": {"latestRevisionName": revision, "latestReadyRevisionName": revision, "configuration": {"ingress": {"traffic": traffic}}}})
+                image = "old-image" if state["awake"] and invalid == "image" else "prodregistry.azurecr.io/demo-api@sha256:" + DIGEST
+                return json.dumps({"properties": {"active": True, "runningState": "Running" if state["awake"] else "Stopped", "healthState": "Healthy" if state["awake"] and invalid != "health" else "Unknown", "template": {"containers": [{"name": "main", "image": image}]}}})
+            with self.subTest(invalid=invalid), patch.object(runtime, "outputs", return_value=values), patch.object(runtime, "command", side_effect=stub):
+                if invalid is None: runtime.readiness(config)
+                else:
+                    with self.assertRaises(runtime.DeploymentError): runtime.readiness(config)
+            self.assertEqual([("az", "containerapp", "show"), ("az", "containerapp", "revision"), ("curl", "--silent", "--show-error"), ("az", "containerapp", "show")], state["calls"][:4])
 
     def test_container_readiness_checks_latest_active_running_healthy_revision_and_traffic(self):
         config = config_for()
