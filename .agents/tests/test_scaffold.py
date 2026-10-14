@@ -805,6 +805,112 @@ class WriteTransactionTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 os.fstat(descriptor)
 
+    def test_write_and_final_close_interruptions_release_all_pins_without_masking(self) -> None:
+        for stage in ("write", "final close"):
+            for interruption_type in (KeyboardInterrupt, SystemExit):
+                for release_error_type in (OSError, KeyboardInterrupt, SystemExit):
+                    with self.subTest(stage=stage, interruption=interruption_type, release_error=release_error_type):
+                        with tempfile.TemporaryDirectory() as temporary:
+                            root = new_project(temporary)
+                            original_open = Path.open
+                            original_release = scaffold.CreatedPath.release
+                            interruption = interruption_type("original interruption")
+                            attempts = []
+
+                            @contextlib.contextmanager
+                            def interrupted_open(target, mode="r", *args, **kwargs):
+                                with original_open(target, mode, *args, **kwargs) as handle:
+                                    if mode == "xb" and stage == "write":
+                                        proxy = unittest.mock.Mock(wraps=handle)
+
+                                        def interrupted_write(data):
+                                            handle.write(data[:3])
+                                            raise interruption
+
+                                        proxy.write.side_effect = interrupted_write
+                                        yield proxy
+                                    else:
+                                        yield handle
+                                if mode == "xb" and stage == "final close" and target.name == ".scaffold.azure.json":
+                                    raise interruption
+
+                            def failing_release(created):
+                                attempts.append(created)
+                                original_release(created)
+                                raise release_error_type("ownership release failed")
+
+                            with self.tracked_pins() as (pins, descriptors), unittest.mock.patch.object(
+                                Path, "open", interrupted_open
+                            ), unittest.mock.patch.object(scaffold.CreatedPath, "release", failing_release):
+                                with self.assertRaises(interruption_type) as caught:
+                                    scaffold.write_project(root, {"nested/first.txt": "first", "nested/second.txt": "second"}, {})
+                            self.assertIs(interruption, caught.exception)
+                            self.assertEqual(list(reversed(pins)), attempts)
+                            self.assert_pins_released(pins, descriptors)
+                            expected = {"nested/first.txt"}
+                            if stage == "final close":
+                                expected |= {"nested/second.txt", ".scaffold.azure.json"}
+                            self.assertEqual(expected, files(root))
+                            moved = root / "released"
+                            (root / "nested").rename(moved)
+                            moved.rename(root / "nested")
+                            first = root / "nested/first.txt"
+                            first.rename(root / "renamed.txt")
+                            (root / "renamed.txt").unlink()
+
+    def test_success_release_interruptions_escape_after_all_attempts_inside_caller_handler(self) -> None:
+        for error_type in (KeyboardInterrupt, SystemExit):
+            with self.subTest(error=error_type), tempfile.TemporaryDirectory() as temporary:
+                root = new_project(temporary)
+                original = scaffold.CreatedPath.release
+                interruption = error_type("release interruption")
+                attempts = []
+
+                def interrupted_release(created):
+                    attempts.append(created)
+                    original(created)
+                    if len(attempts) == 1:
+                        raise interruption
+                    raise OSError("later release failure")
+
+                try:
+                    raise RuntimeError("unrelated caller exception")
+                except RuntimeError:
+                    with self.tracked_pins() as (pins, descriptors), unittest.mock.patch.object(
+                        scaffold.CreatedPath, "release", interrupted_release
+                    ):
+                        with self.assertRaises(error_type) as caught:
+                            scaffold.write_project(root, {"nested/file.txt": "finished"}, {})
+                self.assertIs(interruption, caught.exception)
+                self.assertEqual(list(reversed(pins)), attempts)
+                self.assert_pins_released(pins, descriptors)
+                self.assertEqual("finished", (root / "nested/file.txt").read_text())
+                self.assertEqual({"nested/file.txt", ".scaffold.azure.json"}, files(root))
+                (root / "nested").rename(root / "released")
+
+    def test_normal_write_exceptions_remain_wrapped_and_rolled_back(self) -> None:
+        for error_type in (RuntimeError, ValueError):
+            with self.subTest(error=error_type), tempfile.TemporaryDirectory() as temporary:
+                root = new_project(temporary)
+                original = Path.open
+                failure = error_type("normal write failure")
+
+                @contextlib.contextmanager
+                def failing_open(target, mode="r", *args, **kwargs):
+                    with original(target, mode, *args, **kwargs) as handle:
+                        proxy = unittest.mock.Mock(wraps=handle)
+                        proxy.write.side_effect = failure
+                        yield proxy
+
+                with self.tracked_pins() as (pins, descriptors), unittest.mock.patch.object(Path, "open", failing_open):
+                    with self.assertRaises(scaffold.ScaffoldError) as caught:
+                        scaffold.write_project(root, {"nested/file.txt": "content"}, {})
+                self.assertIs(failure, caught.exception.__cause__)
+                self.assertIn("rolled back newly created outputs", str(caught.exception))
+                self.assert_pins_released(pins, descriptors)
+                self.assertEqual([root / "infra"], list(root.iterdir()))
+                self.assertEqual(set(), files(root))
+
     def test_second_output_preflight_failure_returns_one_without_writes(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = new_project(temporary)
