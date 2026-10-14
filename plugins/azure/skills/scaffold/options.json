@@ -47,6 +47,11 @@
       "default": true,
       "description": "Write the GitHub Actions workflows and composite actions under `.github/`."
     },
+    "prod-release": {
+      "type": "bool",
+      "default": true,
+      "description": "Generate the shared writer production release workflow."
+    },
     "terraform_version": {
       "type": "string",
       "default": "1.16.5",

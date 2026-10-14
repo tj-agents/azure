@@ -24,6 +24,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check out the shared workflow writer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tj-agents/github-actions
+          ref: 432ba0338e21e194f398f1a8bcec876422d2197b
+          path: .workflow-provider
+          persist-credentials: false
+      - name: Bind the shared workflow writer
+        shell: bash
+        run: echo "GITHUB_ACTIONS_SCAFFOLD=$GITHUB_WORKSPACE/.workflow-provider/.agents/github-actions/utility/scaffold/scripts/scaffold.py" >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
@@ -35,7 +45,7 @@ jobs:
         shell: bash
         env:
           AZURE_SCAFFOLD_TERRAFORM: "1"
-        run: python -B -m unittest discover -s .agents/tests -p "test_scaffold.py"
+        run: python -B -m unittest discover -s .agents/tests -p "test_*.py"
 
   actions-lint:
     name: Actions Lint
@@ -47,6 +57,16 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Check out the shared workflow writer
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tj-agents/github-actions
+          ref: 432ba0338e21e194f398f1a8bcec876422d2197b
+          path: .workflow-provider
+          persist-credentials: false
+      - name: Bind the shared workflow writer
+        shell: bash
+        run: echo "GITHUB_ACTIONS_SCAFFOLD=$GITHUB_WORKSPACE/.workflow-provider/.agents/github-actions/utility/scaffold/scripts/scaffold.py" >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"

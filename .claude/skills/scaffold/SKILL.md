@@ -1,6 +1,6 @@
 ---
 name: scaffold
-description: Provide the Azure infrastructure an app profile asks for, in the File structure `azure:structure` records — two Terraform roots (foundation, instance), one instance resource per workload kind, the optional components from `azure:security`, `azure:deployment` and `azure:build`, and the CI gate. Use when an app stack scaffolds Azure infrastructure from its own `infra/app.json`; it writes nothing until the profile and options validate.
+description: Provide the Azure infrastructure an app profile asks for, in the File structure `azure:structure` records â€” two Terraform roots (foundation, instance), one instance resource per workload kind, the optional components from `azure:security`, `azure:deployment` and `azure:build`, and the CI gate. Use when an app stack scaffolds Azure infrastructure from its own `infra/app.json`; it writes nothing until the profile and options validate.
 kind: utility
 domain: azure
 profile: scaffold
