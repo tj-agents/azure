@@ -501,3 +501,49 @@ The installed skills recorder cannot resolve external lifecycle bodies from this
 Existing installed plan-execution/review-lifecycle/lanes bodies were read, their identities retained by
 the parent, and the same standalone scope/review gates apply; captured Workflow v2 freeze/delivery
 operations remain available. This capability mismatch does not weaken candidate or delivery checks.
+
+
+### Provider full review and repair - 2026-10-14
+
+Draft PR13 owns frozen ddadb2ef9eb6180502e07ce0d270de45a2419ac3 from08bd299 after one initial
+synchronization. Exact7-locator full v2 native/API/security results validate all identity, schema,
+referential anchors and conditions. Parent source/probe synthesis completes changes-requested with
+three MEDIUM AP findings: optional Function probe validation, elapsed/subprocess readiness deadline,
+and zero-scale ingress wake-up ordering. Canonical review/security watermarks cover ddadb2e; no source
+approval claimed. Both Terraform OS cases and all Kit/host checks passed; generated lint alone fails
+on pre-existing GHA constant CI OIDC build condition, separately owned GHA B002. Its record-only branch
+and bounded source writer are active in isolated GHA checkouts; no linter suppression/duplicate generic
+writer. Azure source repairs proceed with one exclusive L4 writer, parent work order/goal/Git/delivery;
+GHA immutable CI binding updated only after reviewed-green source merge. Fresh incremental API/security
+review and replacement full exact-head CI gate this same PR13, then merge/cleanup and0b/rest.
+
+
+### Provider review repairs accepted - 2026-10-14
+
+AP1/AP2/AP3 exclusive source writer stopped; parent inspected193 authored changed lines across5 paths,
+10 generated paths+172/-55. Optional consumed non-HTTP probes reject malformed objects/readiness paths
+before any output, valid omitted/empty defaults preserved. Scoped monotonic300-second deadline includes
+probe execution; subprocess timeout and sleeps cap to remaining budget and runtime reports TimeoutExpired
+without traceback. Ingress verifies current promoted digest and traffic before request, wakes an idle
+revision, then rechecks unchanged current revision/digest/active/Running/Healthy/routed success. Background
+health behavior retained.52 focused tests pass;174 real-writer tests pass with12 existing skips and no
+missing writer binding. Isolated174 tests/19 skips preserve exact7 named integrations.240 freshness,
+Python3.9 AST/uniqueness/parity/whitespace pass. Parent Kit1.2.1 tracked-package copy gate artifact
+dd2de89b5f173cfb-provider-ap-package-kit.log passes; direct live-root attempt only rejected the untracked
+runtime binding, which is preserved and absent from package/CI. No source gate suppressed. Hold fixing
+commit until GHA B002 reviewed-green merge provides immutable two-spot CI pin; then fresh incremental
+native/API/security review and full replacement both-OS remote matrix before this same PR13 delivery.
+
+
+### Shared writer prerequisite delivered and adopted - 2026-10-14
+
+GHA record-only PR7 mergedc65d294; source PR8 merged432ba0338e21e194f398f1a8bcec876422d2197b
+from approved1e2a22e after full native/workflow/L2 OIDC concern and ordinary factual-label docs delta.
+All five replacement emitted writer/Kit/host checks38550812322/38550812638 passed; actual MERGED,
+cleanup proof and primary owned-note preservation verified. Both Azure Terraform/scaffold and Actions
+Lint source checkout pins adopt that immutable source. Generic constant condition is repaired by shared
+owner; no Azure rewrite/exemption. AP1/AP2/AP3 source acceptance above remains; parent final real-writer
+suite now binds actual merged432ba03, then private staged/full audits and fixing checkpoint. Fresh
+incremental native/Azure-API/security review plus replacement all6 remote checks gate existing PR13.
+
+Parent final merged-writer suite65be84906ad1e9ed-provider-ap-merged-writer-suite.log passed174 tests with12 existing skips, no missing-binding skip, in40.453 seconds. No Terraform/application/cloud process ran.

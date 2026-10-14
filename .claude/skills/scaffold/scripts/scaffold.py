@@ -553,6 +553,15 @@ def validate_profile(profile: object, values: dict) -> list[str]:
                     + ", ".join(sorted(RUNTIME_NAMES))
                 )
 
+        if kind != "http" and "probes" in workload:
+            probes = workload["probes"]
+            if not isinstance(probes, dict):
+                errors.append(f"{prefix}.probes: must be an object")
+            elif "readiness" in probes:
+                path = probes["readiness"]
+                if not isinstance(path, str) or PROBE_PATH_PATTERN.fullmatch(path) is None:
+                    errors.append(f"{prefix}.probes.readiness: must be a safe URL path starting with /")
+
         if kind == "functions" and not _valid_runtime(workload.get("runtime"), None):
             errors.append(f"{prefix}.runtime: requires name and version")
 

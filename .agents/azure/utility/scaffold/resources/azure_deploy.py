@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from contextvars import ContextVar
 import hashlib
 import json
 import os
@@ -14,12 +15,22 @@ import time
 import zipfile
 
 
+WAIT_DEADLINE = ContextVar("wait_deadline", default=None)
+
+
 class DeploymentError(Exception):
     pass
 
 
 def command(*args: str, cwd: Path | None = None, env: dict | None = None, diagnostic: Path | None = None) -> str:
-    result = subprocess.run(args, cwd=cwd, env=env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE if diagnostic is not None else None)
+    deadline = WAIT_DEADLINE.get()
+    limits = {}
+    if deadline is not None:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise subprocess.TimeoutExpired(args, 0)
+        limits["timeout"] = remaining
+    result = subprocess.run(args, cwd=cwd, env=env, check=False, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE if diagnostic is not None else None, **limits)
     if diagnostic is not None:
         diagnostic.write_text(result.stdout + (result.stderr or ""), encoding="utf-8")
     result.check_returncode()
@@ -251,11 +262,20 @@ def promote(config: dict, manifest: dict, directory: Path, registry: str) -> dic
 
 
 def wait_for(probe, message: str) -> None:
-    for _ in range(30):
-        if probe():
-            return
-        time.sleep(10)
-    raise DeploymentError(message + " within 5 minutes")
+    deadline = time.monotonic() + 300
+    token = WAIT_DEADLINE.set(deadline)
+    try:
+        while time.monotonic() < deadline:
+            ready = probe()
+            remaining = deadline - time.monotonic()
+            if ready and remaining > 0:
+                return
+            if remaining <= 0:
+                break
+            time.sleep(min(10, remaining))
+        raise DeploymentError(message + " within 5 minutes")
+    finally:
+        WAIT_DEADLINE.reset(token)
 
 
 def migration(values: dict) -> None:
@@ -332,22 +352,27 @@ def readiness(config: dict) -> None:
         if asset["host"] == "container-apps":
             expected_image = images[identity]
             require(isinstance(expected_image, str) and re.fullmatch(r"[a-z0-9]+\.azurecr\.io/[a-z0-9-]+@sha256:[0-9a-f]{64}", expected_image), "missing promoted image digest")
+            def routes_to(properties, revision):
+                traffic = properties.get("configuration", {}).get("ingress", {}).get("traffic", [])
+                return any(item.get("weight") == 100 and (item.get("latestRevision") is True or item.get("revisionName") == revision) for item in traffic)
+            def matching_image(current):
+                return any(container.get("name") == "main" and container.get("image") == expected_image for container in current.get("template", {}).get("containers", []))
             def serving():
-                app = json_command("az", "containerapp", "show", "--name", name, "--resource-group", group)
-                properties = app.get("properties", {})
+                properties = json_command("az", "containerapp", "show", "--name", name, "--resource-group", group).get("properties", {})
                 revision = properties.get("latestRevisionName")
-                if not revision or properties.get("latestReadyRevisionName") != revision:
+                if not revision:
                     return False
                 current = json_command("az", "containerapp", "revision", "show", "--name", name, "--resource-group", group, "--revision", revision).get("properties", {})
-                containers = current.get("template", {}).get("containers", [])
-                if not any(container.get("name") == "main" and container.get("image") == expected_image for container in containers):
-                    return False
-                if current.get("healthState") != "Healthy" or current.get("runningState") != "Running" or current.get("active") is not True:
+                if not matching_image(current):
                     return False
                 if asset["kind"] != "background":
-                    traffic = properties.get("configuration", {}).get("ingress", {}).get("traffic", [])
-                    return any(item.get("weight") == 100 and (item.get("latestRevision") is True or item.get("revisionName") == revision) for item in traffic) and http_ready(target["hostname"], asset["readiness"])
-                return True
+                    if not routes_to(properties, revision) or not http_ready(target["hostname"], asset["readiness"]):
+                        return False
+                    properties = json_command("az", "containerapp", "show", "--name", name, "--resource-group", group).get("properties", {})
+                    if properties.get("latestRevisionName") != revision or not routes_to(properties, revision):
+                        return False
+                    current = json_command("az", "containerapp", "revision", "show", "--name", name, "--resource-group", group, "--revision", revision).get("properties", {})
+                return properties.get("latestReadyRevisionName") == revision and matching_image(current) and current.get("active") is True and current.get("runningState") == "Running" and current.get("healthState") == "Healthy"
             wait_for(serving, identity + " latest revision did not become serving")
         elif asset["host"] == "flex-consumption":
             def serving():
@@ -420,7 +445,7 @@ def main(argv: list[str] | None = None) -> int:
             validate()
         else:
             globals()[args.operation](config)
-    except (DeploymentError, OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError, tarfile.TarError, zipfile.BadZipFile) as error:
+    except (DeploymentError, OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError, subprocess.TimeoutExpired, tarfile.TarError, zipfile.BadZipFile) as error:
         print("::error file=infra/scripts/azure_deploy.py::" + str(error), file=sys.stderr)
         return 1
     return 0
