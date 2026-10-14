@@ -38,3 +38,15 @@
 - **Verification evidence:** temporary-directory pure Python reproduction patches only the final metadata write to raise OSError; scaffold exits1 and the existing profile is absent. No repository source or cloud resources were changed by the reproduction.
 
 - **Repair verification:** identical existing external profiles are omitted from outputs and preserve bytes/mtime; exclusive creation and lstat redirect checks precede writes. Rollback compares created file/directory identity and retains replacements or unprovable paths. Twenty focused transaction tests passed (five Windows symlink-privilege skips), including actual junction rejection and injected partial/metadata failures; generated freshness and pinned Kit conformance passed. Full exact-head two-OS CI remains required. Portable path APIs do not guarantee atomic protection from hostile substitution between ownership checks and deletion.
+
+## B004 - Interrupted writer retains ownership references
+
+- **Kind:** bug
+- **Observed/reported:** 2026-10-14. At main f05693ec77646cbdef83f35b68d0ac335a61f4e8, a temporary-only injected KeyboardInterrupt during write_project's first output write escapes with a duplicated file descriptor and Windows directory handle still live. The importing caller catches the interruption and continues. Cause confirmed: write_project catches Exception and releases references only in that handler or after success, with no unconditional finally; KeyboardInterrupt bypasses both paths at .agents/azure/utility/scaffold/scripts/scaffold.py:2431-2445.
+- **Impact and priority:** P2; an importing process that catches interruption retains file/directory resources, and Windows outputs remain locked against deletion or rename until process exit. No leak beyond a terminated process is claimed.
+- **Source owner:** tj-agents/azure, scaffold outer write transaction.
+- **State:** open
+- **Repair link:** BUGS.md#B004 and plans/actions-conformance/GOAL.md under the existing standards-finish owner; same observation as GHA review WT-1, separate source implementation. Preserve resolved B003 profile/rollback evidence.
+- **Next action:** release all acquired ownership references unconditionally without masking the original interruption; verify write/close interruption regressions before Azure composition.
+- **Resolution condition:** injected interruption during write or stream close propagates unchanged after every acquired reference receives exactly one release attempt; handled failures and success-release diagnostics retain their verified behavior on Linux and Windows.
+- **Verification evidence:** parent disposable-file probe at the recorded main head observed two live references after catching KeyboardInterrupt, then explicitly released both and removed the temporary data. No cloud command or application build occurred.
