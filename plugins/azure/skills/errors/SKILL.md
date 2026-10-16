@@ -11,8 +11,5 @@ provenance: house
 
 # Azure errors
 
-Owns error types, how errors propagate, and what may fail fast.
-
-## Agreed
-
-_Nothing yet._ Propose a rule through `azure:learning`'s convention procedure.
+Read and follow the [canonical definition](../../.agents/azure/contract/errors/SKILL.md) in full.
+This discovery entry is generated; edit the referenced `.agents/` definition.

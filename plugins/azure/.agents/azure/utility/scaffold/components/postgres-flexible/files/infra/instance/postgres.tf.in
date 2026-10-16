@@ -1,0 +1,31 @@
+resource "azurerm_user_assigned_identity" "migrator" {
+  name                = "${local.instance_prefix}-migrator-id"
+  resource_group_name = data.azurerm_resource_group.main.name
+  location            = data.azurerm_resource_group.main.location
+
+  tags = local.tags
+}
+
+resource "time_sleep" "migrator_propagation" {
+  create_duration = "60s"
+
+  depends_on = [azurerm_user_assigned_identity.migrator]
+}
+
+resource "azurerm_postgresql_flexible_server_active_directory_administrator" "migrator" {
+  server_name         = data.azurerm_postgresql_flexible_server.main.name
+  resource_group_name = data.azurerm_resource_group.main.name
+  tenant_id           = data.azurerm_client_config.current.tenant_id
+  object_id           = azurerm_user_assigned_identity.migrator.principal_id
+  principal_name      = azurerm_user_assigned_identity.migrator.name
+  principal_type      = "ServicePrincipal"
+
+  depends_on = [time_sleep.migrator_propagation]
+}
+
+resource "azurerm_postgresql_flexible_server_database" "main" {
+  name      = local.database_name
+  server_id = data.azurerm_postgresql_flexible_server.main.id
+
+  depends_on = [azurerm_postgresql_flexible_server_active_directory_administrator.migrator]
+}

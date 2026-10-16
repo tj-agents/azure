@@ -7,5 +7,15 @@
   },
   "repository": "https://github.com/tj-agents/azure",
   "skills": "./skills/",
-  "keywords": ["azure", "terraform", "infrastructure"]
+  "keywords": [
+    "azure",
+    "terraform",
+    "infrastructure"
+  ],
+  "dependencies": [
+    "base@tj-agents",
+    "engineering@tj-agents",
+    "machine@tj-agents",
+    "base@base-agents"
+  ]
 }

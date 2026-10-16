@@ -1,0 +1,3 @@
+locals {
+  database_name = replace(local.instance_prefix, "-", "_")
+}

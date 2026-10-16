@@ -1,0 +1,9 @@
+resource "azurerm_role_assignment" "key_vault_secrets_user" {
+  for_each = local.key_vault_workloads
+
+  scope                = data.azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.workload[each.key].principal_id
+
+  depends_on = [time_sleep.workload_identity_propagation]
+}
