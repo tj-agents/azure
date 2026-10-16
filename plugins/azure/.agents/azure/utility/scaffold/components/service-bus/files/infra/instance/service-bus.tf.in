@@ -1,0 +1,58 @@
+locals {
+  publish_entries = merge([
+    for id, workload in local.workloads : {
+      for topic in workload.publishes : "${id}-${topic}" => { id = id, topic = topic }
+    }
+  ]...)
+
+  consume_entries = merge([
+    for id, workload in local.workloads : {
+      for entry in workload.consumes : "${id}-${entry.topic}" => {
+        id    = id
+        topic = entry.topic
+        types = entry.types
+      }
+    }
+  ]...)
+}
+
+resource "azurerm_servicebus_subscription" "main" {
+  for_each = local.consume_entries
+
+  name     = "${each.value.id}-${each.value.topic}"
+  topic_id = data.azurerm_servicebus_topic.topic[each.value.topic].id
+
+  max_delivery_count                        = 10
+  lock_duration                             = "PT1M"
+  dead_lettering_on_message_expiration      = true
+  dead_lettering_on_filter_evaluation_error = true
+}
+
+resource "azurerm_servicebus_subscription_rule" "handled_types" {
+  for_each = local.consume_entries
+
+  name            = "handled-types"
+  subscription_id = azurerm_servicebus_subscription.main[each.key].id
+  filter_type     = "SqlFilter"
+  sql_filter      = "[type] IN (${join(", ", [for type in each.value.types : format("'%s'", type)])})"
+}
+
+resource "azurerm_role_assignment" "service_bus_receiver" {
+  for_each = local.consume_entries
+
+  scope                = azurerm_servicebus_subscription.main[each.key].id
+  role_definition_name = "Azure Service Bus Data Receiver"
+  principal_id         = azurerm_user_assigned_identity.workload[each.value.id].principal_id
+
+  depends_on = [time_sleep.workload_identity_propagation]
+}
+
+resource "azurerm_role_assignment" "service_bus_sender" {
+  for_each = local.publish_entries
+
+  scope                = data.azurerm_servicebus_topic.topic[each.value.topic].id
+  role_definition_name = "Azure Service Bus Data Sender"
+  principal_id         = azurerm_user_assigned_identity.workload[each.value.id].principal_id
+
+  depends_on = [time_sleep.workload_identity_propagation]
+}

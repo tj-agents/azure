@@ -1,6 +1,9 @@
 {
   "plugin": "azure",
   "dependencies": [
+    "tj-agents/base",
+    "tj-agents/engineering",
+    "tj-agents/machine",
     "base-agents/base"
   ],
   "profiles": {

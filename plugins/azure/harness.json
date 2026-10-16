@@ -1,11 +1,35 @@
 {
   "schema_version": 1,
   "plugin": "azure-agents/azure",
-  "source_roots": [".agents/azure"],
+  "source_roots": [
+    ".agents/azure"
+  ],
   "requires": {
-    "marketplaces": [{"id": "azure-agents", "repository": "tj-agents/azure"}, {"id": "base-agents", "repository": "tj-agents/core"}],
-    "plugins": ["azure-agents/azure", "base-agents/base"],
+    "marketplaces": [
+      {
+        "id": "azure-agents",
+        "repository": "tj-agents/azure"
+      },
+      {
+        "id": "base-agents",
+        "repository": "tj-agents/core"
+      },
+      {
+        "id": "tj-agents",
+        "repository": "tj-agents/marketplace"
+      }
+    ],
+    "plugins": [
+      "azure-agents/azure",
+      "tj-agents/base",
+      "tj-agents/engineering",
+      "tj-agents/machine",
+      "base-agents/base"
+    ],
     "hooks": [],
-    "permissions": {"claude_allow": [], "codex_prefix_rules": []}
+    "permissions": {
+      "claude_allow": [],
+      "codex_prefix_rules": []
+    }
   }
 }

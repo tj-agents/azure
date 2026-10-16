@@ -16,5 +16,9 @@
         "infrastructure"
       ]
     }
+  ],
+  "allowCrossMarketplaceDependenciesOn": [
+    "base-agents",
+    "tj-agents"
   ]
 }

@@ -11,8 +11,5 @@ provenance: house
 
 # Azure testing
 
-Owns test tiers and their naming, layout and fixtures.
-
-## Agreed
-
-_Nothing yet._ Propose a rule through `azure:learning`'s convention procedure.
+Read and follow the [canonical definition](../../.agents/azure/contract/testing/SKILL.md) in full.
+This discovery entry is generated; edit the referenced `.agents/` definition.

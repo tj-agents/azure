@@ -11,8 +11,5 @@ provenance: house
 
 # Azure libraries
 
-Owns when to take a dependency and which ones are chosen.
-
-## Agreed
-
-_Nothing yet._ Propose a rule through `azure:learning`'s convention procedure.
+Read and follow the [canonical definition](../../.agents/azure/contract/libraries/SKILL.md) in full.
+This discovery entry is generated; edit the referenced `.agents/` definition.
