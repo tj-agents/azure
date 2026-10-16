@@ -1,0 +1,5 @@
+{
+  "order": 30,
+  "when": "has_database",
+  "description": "Postgres Flexible Server, Entra-only, with the instance's database and migrator identity."
+}

@@ -2427,7 +2427,7 @@ def find_working_bash() -> str | None:
             continue
         try:
             result = subprocess.run([candidate, "-c", "echo ok"], capture_output=True, text=True, timeout=10)
-        except OSError:
+        except (OSError, subprocess.TimeoutExpired):
             continue
         if result.returncode == 0 and result.stdout.strip() == "ok":
             return candidate

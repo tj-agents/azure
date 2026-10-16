@@ -1,0 +1,5 @@
+{
+  "order": 21,
+  "when": "http_app_service",
+  "description": "Linux App Service plan, and a web app plus staging slot per `http` workload hosted there."
+}

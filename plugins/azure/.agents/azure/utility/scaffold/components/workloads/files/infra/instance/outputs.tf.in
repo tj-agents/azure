@@ -1,0 +1,3 @@
+output "workload_identity_client_ids" {
+  value = { for id, identity in azurerm_user_assigned_identity.workload : id => identity.client_id }
+}

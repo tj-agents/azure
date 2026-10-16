@@ -1,0 +1,10 @@
+env    = "ci"
+region = "uks"
+
+github_owner         = "changeme"
+github_owner_id      = "0"
+github_repository    = "changeme"
+github_repository_id = "0"
+
+budget_start_date   = "2026-01-01T00:00:00Z"
+budget_alert_emails = []
