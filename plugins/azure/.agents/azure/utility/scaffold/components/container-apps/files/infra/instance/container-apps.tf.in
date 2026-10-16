@@ -1,0 +1,109 @@
+resource "azurerm_role_assignment" "acr_pull" {
+  for_each = local.container_apps_workloads
+
+  scope                = data.azurerm_container_registry.main.id
+  role_definition_name = "AcrPull"
+  principal_id         = azurerm_user_assigned_identity.workload[each.key].principal_id
+
+  depends_on = [time_sleep.workload_identity_propagation]
+}
+
+resource "time_sleep" "acr_pull_propagation" {
+  for_each = local.container_apps_workloads
+
+  create_duration = "60s"
+
+  depends_on = [azurerm_role_assignment.acr_pull]
+}
+
+resource "azurerm_container_app" "main" {
+  for_each = local.container_apps_workloads
+
+  name                         = "${local.instance_prefix}-${each.key}-ca"
+  resource_group_name          = data.azurerm_resource_group.main.name
+  container_app_environment_id = data.azurerm_container_app_environment.main.id
+  revision_mode                = "Single"
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.workload[each.key].id]
+  }
+
+  registry {
+    server   = data.azurerm_container_registry.main.login_server
+    identity = azurerm_user_assigned_identity.workload[each.key].id
+  }
+
+  dynamic "ingress" {
+    for_each = each.value.kind == "background" ? [] : [each.value]
+    content {
+      external_enabled = true
+      target_port      = ingress.value.port
+
+      traffic_weight {
+        latest_revision = true
+        percentage      = 100
+      }
+    }
+  }
+
+  template {
+    min_replicas = each.value.kind == "background" ? 1 : null
+
+    container {
+      name   = "main"
+      image  = lookup(var.images, each.key, "mcr.microsoft.com/k8se/quickstart:latest")
+      cpu    = 0.5
+      memory = "1Gi"
+
+      dynamic "liveness_probe" {
+        for_each = each.value.kind == "http" ? [each.value] : []
+        content {
+          transport = "HTTP"
+          port      = liveness_probe.value.port
+          path      = liveness_probe.value.probes.liveness
+        }
+      }
+
+      dynamic "readiness_probe" {
+        for_each = each.value.kind == "http" ? [each.value] : []
+        content {
+          transport = "HTTP"
+          port      = readiness_probe.value.port
+          path      = readiness_probe.value.probes.readiness
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.settings[each.key]
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = each.value.kind == "functions" ? {
+          AzureWebJobsStorage__accountName = azurerm_storage_account.function[each.key].name
+          AzureWebJobsStorage__credential  = "managedidentity"
+          AzureWebJobsStorage__clientId    = azurerm_user_assigned_identity.workload[each.key].client_id
+        } : {}
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+    }
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    precondition {
+      condition     = length("${local.instance_prefix}-${each.key}-ca") <= 32
+      error_message = "Container App name must be 32 characters or fewer."
+    }
+  }
+
+  depends_on = [time_sleep.acr_pull_propagation]
+}

@@ -1,0 +1,23 @@
+locals {
+  region_names = {
+    uks = "uksouth"
+    ukw = "ukwest"
+    weu = "westeurope"
+    neu = "northeurope"
+  }
+
+  location        = local.region_names[var.region]
+  prefix          = "${var.region}-${var.env}-__NAME__"
+  instance_prefix = var.ephemeral_id != "" ? "${local.prefix}-${var.ephemeral_id}" : local.prefix
+  compact         = replace(local.instance_prefix, "-", "")
+
+  tags = merge(
+    {
+      workload    = "__NAME__"
+      environment = var.env
+      region      = var.region
+      managed_by  = "terraform"
+    },
+    var.ephemeral_id != "" ? { ephemeral_id = var.ephemeral_id } : {}
+  )
+}

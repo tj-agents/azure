@@ -1,0 +1,66 @@
+variable "env" {
+  type        = string
+  description = "Short environment code."
+
+  validation {
+    condition     = can(regex("^[a-z]{2,5}$", var.env))
+    error_message = "env must be 2-5 lowercase letters."
+  }
+}
+
+variable "region" {
+  type        = string
+  description = "Short region code."
+
+  validation {
+    condition     = contains(["uks", "ukw", "weu", "neu"], var.region)
+    error_message = "region must be one of uks, ukw, weu, neu."
+  }
+}
+
+variable "github_owner" {
+  type        = string
+  description = "GitHub owner login for the deploy identity's federated credential."
+}
+
+variable "github_owner_id" {
+  type        = string
+  description = "GitHub owner id for the deploy identity's federated credential."
+}
+
+variable "github_repository" {
+  type        = string
+  description = "GitHub repository name for the deploy identity's federated credential."
+}
+
+variable "github_repository_id" {
+  type        = string
+  description = "GitHub repository id for the deploy identity's federated credential."
+}
+
+variable "budget_amount" {
+  type        = number
+  default     = 10
+  description = "Monthly budget amount for the resource group, in the subscription's currency."
+
+  validation {
+    condition     = var.budget_amount > 0
+    error_message = "budget_amount must be greater than 0."
+  }
+}
+
+variable "budget_start_date" {
+  type        = string
+  description = "RFC 3339 timestamp for the first day of a month; the budget's start date."
+
+  validation {
+    condition     = can(regex("^\\d{4}-\\d{2}-01T00:00:00Z$", var.budget_start_date))
+    error_message = "budget_start_date must be an RFC 3339 timestamp for the first of a month."
+  }
+}
+
+variable "budget_alert_emails" {
+  type        = list(string)
+  default     = []
+  description = "Extra email addresses notified at 80% and 100% of the budget."
+}

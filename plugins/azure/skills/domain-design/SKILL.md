@@ -11,8 +11,5 @@ provenance: house
 
 # Azure domain design
 
-Owns how domain values, entities, state transitions and shared behaviour are modelled.
-
-## Agreed
-
-_Nothing yet._ Propose a rule through `azure:learning`'s convention procedure.
+Read and follow the [canonical definition](../../.agents/azure/contract/domain-design/SKILL.md) in full.
+This discovery entry is generated; edit the referenced `.agents/` definition.

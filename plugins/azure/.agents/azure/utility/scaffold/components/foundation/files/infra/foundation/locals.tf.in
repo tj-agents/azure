@@ -1,0 +1,19 @@
+locals {
+  region_names = {
+    uks = "uksouth"
+    ukw = "ukwest"
+    weu = "westeurope"
+    neu = "northeurope"
+  }
+
+  location = local.region_names[var.region]
+  prefix   = "${var.region}-${var.env}-__NAME__"
+  compact  = replace(local.prefix, "-", "")
+
+  tags = {
+    workload    = "__NAME__"
+    environment = var.env
+    region      = var.region
+    managed_by  = "terraform"
+  }
+}
