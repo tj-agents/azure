@@ -1,6 +1,5 @@
 {
   "name": "azure",
-  "version": "0.1.0",
   "description": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
   "author": {
     "name": "Tommy Seery"
