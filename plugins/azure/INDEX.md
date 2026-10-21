@@ -4,6 +4,7 @@
 - `deployment` — contract — core
 - `domain-design` — contract — core
 - `errors` — contract — core
+- `explanation` — contract — core
 - `libraries` — contract — core
 - `security` — contract — core
 - `structure` — contract — core
