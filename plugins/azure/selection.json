@@ -12,6 +12,7 @@
       "deployment",
       "domain-design",
       "errors",
+      "explanation",
       "libraries",
       "security",
       "structure",
@@ -87,6 +88,20 @@
     },
     {
       "name": "errors",
+      "kind": "contract",
+      "profile": "core",
+      "applicability": [
+        "Azure projects"
+      ],
+      "requires": [
+        "azure"
+      ],
+      "provenance": [
+        "house"
+      ]
+    },
+    {
+      "name": "explanation",
       "kind": "contract",
       "profile": "core",
       "applicability": [
