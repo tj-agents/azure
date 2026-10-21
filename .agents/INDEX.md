@@ -8,6 +8,7 @@ Generated from `.agents/<plugin>/<kind>/<family>/<member>/SKILL.md`; a skill's n
 - `deployment` — contract — core — `.agents/azure/contract/deployment/SKILL.md`
 - `domain-design` — contract — core — `.agents/azure/contract/domain-design/SKILL.md`
 - `errors` — contract — core — `.agents/azure/contract/errors/SKILL.md`
+- `explanation` — contract — core — `.agents/azure/contract/explanation/SKILL.md`
 - `libraries` — contract — core — `.agents/azure/contract/libraries/SKILL.md`
 - `security` — contract — core — `.agents/azure/contract/security/SKILL.md`
 - `structure` — contract — core — `.agents/azure/contract/structure/SKILL.md`
