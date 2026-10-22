@@ -6,7 +6,7 @@
   },
   "dependencies": {
     "azure": [
-      "base-agents/base"
+      "tj-agents/base"
     ]
   }
 }
