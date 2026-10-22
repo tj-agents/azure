@@ -1,5 +1,4 @@
 {
-  "name": "azure-agents",
   "description": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
   "owner": {
     "name": "Tommy Seery"

@@ -1,5 +1,5 @@
 {
-  "name": "azure-agents",
+  "name": "tj-agents",
   "description": "Azure infrastructure learning companion, standards and a Terraform scaffold.",
   "owner": {
     "name": "Tommy Seery"
@@ -16,9 +16,5 @@
         "infrastructure"
       ]
     }
-  ],
-  "allowCrossMarketplaceDependenciesOn": [
-    "base-agents",
-    "tj-agents"
   ]
 }

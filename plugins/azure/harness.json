@@ -1,30 +1,21 @@
 {
   "schema_version": 1,
-  "plugin": "azure-agents/azure",
+  "plugin": "tj-agents/azure",
   "source_roots": [
     ".agents/azure"
   ],
   "requires": {
     "marketplaces": [
       {
-        "id": "azure-agents",
-        "repository": "tj-agents/azure"
-      },
-      {
-        "id": "base-agents",
-        "repository": "tj-agents/core"
-      },
-      {
         "id": "tj-agents",
         "repository": "tj-agents/marketplace"
       }
     ],
     "plugins": [
-      "azure-agents/azure",
+      "tj-agents/azure",
       "tj-agents/base",
       "tj-agents/engineering",
-      "tj-agents/machine",
-      "base-agents/base"
+      "tj-agents/machine"
     ],
     "hooks": [],
     "permissions": {
