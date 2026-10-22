@@ -2,7 +2,7 @@
 
 Azure infrastructure learning companion, standards and a Terraform scaffold.
 
-Published as plugin `azure` from this repository's `azure-agents` marketplace.
+Published as plugin `tj-agents/azure` from the `tj-agents` marketplace.
 
 ## Skills
 

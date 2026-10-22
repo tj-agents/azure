@@ -1,5 +1,4 @@
 {
-  "name": "azure-agents",
   "interface": {
     "displayName": "Azure"
   }

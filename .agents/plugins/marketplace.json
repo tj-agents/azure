@@ -1,5 +1,5 @@
 {
-  "name": "azure-agents",
+  "name": "tj-agents",
   "interface": {
     "displayName": "Azure"
   },
