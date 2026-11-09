@@ -19,5 +19,6 @@
     "category": "development",
     "capabilities": [],
     "defaultPrompt": "Teach me the next Azure concept my current task needs."
-  }
+  },
+  "version": "fb18985b70b6"
 }

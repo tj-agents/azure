@@ -8,6 +8,7 @@ import hashlib
 import json
 import posixpath
 import re
+import shlex
 import shutil
 import stat
 import subprocess
@@ -62,7 +63,6 @@ CODEX_HOOK_MANIFEST = "hooks/codex.json"
 CLAUDE_HOOK_MANIFEST = "hooks/claude.json"
 CODEX_HOOK_PACKAGE_LOADER = "hooks/codex/snapshot.py"
 CODEX_WINDOWS_COMMAND_BUDGET = 8191
-WINDOWS_MAX_PATH = 260
 GENERATED_ROOTS = (
     ".claude/skills",
     ".codex/skills",
@@ -1300,6 +1300,30 @@ def canonical_text(data: bytes) -> bytes:
     return text.replace("\r\n", "\n").replace("\r", "\n").encode("utf-8")
 
 
+def stamp_codex_versions(output: dict[str, bytes], packages: list[str]) -> None:
+    for package in packages:
+        prefix = f"plugins/{package}/"
+        manifest = f"{prefix}.codex-plugin/plugin.json"
+        excluded = {
+            manifest,
+            f"{prefix}.claude-plugin/plugin.json",
+            f"{prefix}{CODEX_HOOK_MANIFEST}",
+        }
+        digest = hashlib.sha256()
+        for path in sorted(output):
+            if not path.startswith(prefix) or path in excluded:
+                continue
+            content = canonical_text(output[path])
+            digest.update(path.removeprefix(prefix).encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(str(len(content)).encode("ascii"))
+            digest.update(b"\0")
+            digest.update(content)
+        payload = json.loads(output[manifest])
+        payload["version"] = digest.hexdigest()[:12]
+        output[manifest] = dump(payload).encode("utf-8")
+
+
 def package_digest(output: dict[str, bytes], package: str) -> str:
     prefix = f"plugins/{package}/"
     digest = hashlib.sha256()
@@ -1326,7 +1350,9 @@ class LoaderDigest(ast.NodeTransformer):
         return node
 
 
-def codex_snapshot_bootstrap(root: Path, loader: bytes) -> str:
+def codex_snapshot_bootstrap(
+    root: Path, loader: bytes, arguments: list[ast.expr] | None = None
+) -> str:
     tree = ast.parse((root / CODEX_HOOK_BOOTSTRAP).read_text(encoding="utf-8"))
     for statement in tree.body:
         if not isinstance(statement, BOOTSTRAP_STATEMENTS):
@@ -1335,6 +1361,40 @@ def codex_snapshot_bootstrap(root: Path, loader: bytes) -> str:
                 "fit one command line"
             )
     tree = LoaderDigest(hashlib.sha256(loader).hexdigest()).visit(tree)
+    if arguments is not None:
+        imports = 0
+        for statement in tree.body:
+            if not isinstance(statement, (ast.Import, ast.ImportFrom)):
+                break
+            imports += 1
+        tree.body.insert(
+            imports,
+            ast.Assign(
+                targets=[
+                    ast.Attribute(
+                        value=ast.Name(id="sys", ctx=ast.Load()),
+                        attr="argv",
+                        ctx=ast.Store(),
+                    )
+                ],
+                value=ast.List(
+                    elts=[
+                        ast.Subscript(
+                            value=ast.Attribute(
+                                value=ast.Name(id="sys", ctx=ast.Load()),
+                                attr="argv",
+                                ctx=ast.Load(),
+                            ),
+                            slice=ast.Constant(0),
+                            ctx=ast.Load(),
+                        ),
+                        *arguments,
+                    ],
+                    ctx=ast.Load(),
+                ),
+            ),
+        )
+        ast.fix_missing_locations(tree)
     command = ";".join(ast.unparse(statement) for statement in tree.body)
     unsafe = sorted({character for character in command if character in COMMAND_UNSAFE})
     if unsafe:
@@ -1348,6 +1408,59 @@ def snapshot_command(command: str, prefix: str, wrapped: str, field: str) -> str
     if not command.startswith(prefix + '"${PLUGIN_ROOT}/'):
         raise ValueError(f"Unsupported Codex hook {field}: {command}")
     return wrapped + command.removeprefix(prefix)
+
+
+def windows_hook_arguments(command: str, field: str) -> list[str]:
+    prefix = 'python -B "${PLUGIN_ROOT}/'
+    if not isinstance(command, str):
+        raise ValueError(f"Unsupported Codex hook {field}: command must be a string")
+    if not command.startswith(prefix):
+        raise ValueError(f"Unsupported Codex hook {field}: {command}")
+    try:
+        arguments = shlex.split(command)
+    except ValueError as error:
+        raise ValueError(
+            f"Unsupported Codex hook {field}: invalid shell arguments"
+        ) from error
+    if arguments[:2] != ["python", "-B"]:
+        raise ValueError(f"Unsupported Codex hook {field}: {command}")
+    return arguments[2:]
+
+
+def windows_bootstrap_argument(argument: str) -> ast.expr:
+    root = ast.Subscript(
+        value=ast.Attribute(
+            value=ast.Name(id="os", ctx=ast.Load()),
+            attr="environ",
+            ctx=ast.Load(),
+        ),
+        slice=ast.Constant("PLUGIN_ROOT"),
+        ctx=ast.Load(),
+    )
+    parts = argument.split("${PLUGIN_ROOT}")
+    if len(parts) == 1 and "%" not in argument:
+        return ast.Constant(argument)
+    values: list[ast.expr] = []
+    for index, part in enumerate(parts):
+        percent_parts = part.split("%")
+        for percent_index, percent_part in enumerate(percent_parts):
+            if percent_part:
+                values.append(ast.Constant(percent_part))
+            if percent_index < len(percent_parts) - 1:
+                values.append(
+                    ast.Call(
+                        func=ast.Name(id="chr", ctx=ast.Load()),
+                        args=[ast.Constant(37)],
+                        keywords=[],
+                    )
+                )
+        if index < len(parts) - 1:
+            values.append(root)
+    return ast.Call(
+        func=ast.Attribute(value=ast.Constant(""), attr="join", ctx=ast.Load()),
+        args=[ast.List(elts=values, ctx=ast.Load())],
+        keywords=[],
+    )
 
 
 def claude_command_hook(hook: JSONObject, package: str) -> None:
@@ -1418,7 +1531,7 @@ def bind_codex_hook_snapshots(
         output[f"plugins/{package}/{CODEX_HOOK_PACKAGE_LOADER}"] = loader
         expected = package_digest(output, package)
         root_argument = '"${PLUGIN_ROOT}"'
-        arguments = f'-c "{bootstrap}" {root_argument} "{expected}" "{package}" '
+        linux_arguments = f'-c "{bootstrap}" {root_argument} "{expected}" "{package}" '
         payload = json.loads(output[manifest])
         for groups in payload["hooks"].values():
             for group in groups:
@@ -1428,23 +1541,42 @@ def bind_codex_hook_snapshots(
                     hook["command"] = snapshot_command(
                         hook["command"],
                         "python3 -B ",
-                        "tj_hook -- python3 -I -B " + arguments,
+                        "tj_hook -- python3 -I -B " + linux_arguments,
                         "command",
                     )
-                    windows = snapshot_command(
-                        hook["commandWindows"],
-                        "python -B ",
-                        "tj_hook -- python -I -B " + arguments,
-                        "commandWindows",
+                    arguments = windows_hook_arguments(
+                        hook["commandWindows"], "commandWindows"
                     )
-                    expanded = len(windows) + windows.count("${PLUGIN_ROOT}") * (
-                        WINDOWS_MAX_PATH - len("${PLUGIN_ROOT}")
+                    windows_bootstrap = codex_snapshot_bootstrap(
+                        root,
+                        loader,
+                        [
+                            ast.Subscript(
+                                value=ast.Attribute(
+                                    value=ast.Name(id="os", ctx=ast.Load()),
+                                    attr="environ",
+                                    ctx=ast.Load(),
+                                ),
+                                slice=ast.Constant("PLUGIN_ROOT"),
+                                ctx=ast.Load(),
+                            ),
+                            ast.Constant(expected),
+                            ast.Constant(package),
+                            *[
+                                windows_bootstrap_argument(argument)
+                                for argument in arguments
+                            ],
+                        ],
                     )
-                    if expanded > CODEX_WINDOWS_COMMAND_BUDGET:
+                    windows = (
+                        'cmd.exe /d /s /v:off /c tj_hook -- python -I -B -c "'
+                        + windows_bootstrap
+                        + '"'
+                    )
+                    if len(windows) > CODEX_WINDOWS_COMMAND_BUDGET:
                         raise ValueError(
                             f"{package}: Codex commandWindows exceeds the "
-                            f"{CODEX_WINDOWS_COMMAND_BUDGET}-character cmd.exe budget "
-                            "once ${PLUGIN_ROOT} expands"
+                            f"{CODEX_WINDOWS_COMMAND_BUDGET}-character cmd.exe budget"
                         )
                     hook["commandWindows"] = windows
         output[manifest] = dump(payload).encode("utf-8")
@@ -1625,6 +1757,7 @@ def build(root: Path) -> dict[str, bytes]:
             emit(f"plugins/{package}/.{host}-plugin/plugin.json", dump(manifest))
 
     bind_claude_hook_commands(output, list(publications))
+    stamp_codex_versions(output, list(publications))
     bind_codex_hook_snapshots(root, output, list(publications))
     emit(".agents/INDEX.md", "\n".join(repository_index))
     claude_entries, codex_entries = [], []
