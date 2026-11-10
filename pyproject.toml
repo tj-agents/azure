@@ -1,0 +1,72 @@
+[project]
+name = "tj-agents-azure"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["mypy>=2.4.1", "pytest>=9.1.1", "pytest-socket>=0.7.0", "ruff>=0.17.4"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+extend-exclude = [".agents/sync_generated.py", ".agents/dependencies", ".codex/skills", ".claude/skills", ".codex/hooks/snapshot.py", ".codex/hooks/bootstrap.py", ".worktrees", ".template", "plugins"]
+include = ["*.py", "*.pyi"]
+
+[tool.ruff.lint]
+preview = true
+explicit-preview-rules = true
+select = ["E", "W", "F", "I", "N", "UP", "B", "A", "BLE", "C4", "SIM", "PTH", "PIE", "RET", "RUF", "PGH004", "ANN401", "G004", "PLW1514", "LOG002", "LOG015", "PLC2701", "ICN001", "TID251", "TRY300", "PT009", "PT011", "PT006", "PLR6301"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"sys.path" = { "msg" = "Install the declared dependency; do not modify the import search path." }
+"importlib.util.spec_from_file_location" = { "msg" = "Import the installed public API; do not load another checkout by path." }
+"unittest.TestCase" = { "msg" = "Use plain pytest functions and bare assertions." }
+
+[tool.ruff.lint.flake8-pytest-style]
+raises-require-match-for = ["*"]
+
+[tool.mypy]
+exclude = ["(^|/)(?:\\.agents/sync_generated\\.py|\\.agents/dependencies/|\\.codex/skills/|\\.claude/skills/|\\.codex/hooks/(?:snapshot|bootstrap)\\.py|\\.worktrees/|\\.template/)", "^plugins/"]
+explicit_package_bases = true
+strict = true
+warn_unreachable = true
+enable_error_code = ["ignore-without-code", "exhaustive-match"]
+files = [".agents"]
+
+[tool.pytest]
+strict = true
+testpaths = [".agents/tests"]
+addopts = ["--import-mode=importlib", "--disable-socket", "-ra"]
+filterwarnings = ["error"]
+
+[tool.ruff.lint.per-file-ignores]
+".agents/tests/test_scaffold.py" = ["B007", "B023", "E501", "I001", "PLR6301", "PT009", "PTH108", "RUF012", "SIM117", "TID251"]
+".agents/tests/test_declared_dependencies.py" = ["E501", "I001", "PT009", "TID251"]
+".agents/tests/generate_for_lint.py" = ["E501"]
+".agents/azure/utility/scaffold/scripts/scaffold.py" = ["B904", "BLE001", "C416", "E501", "F841", "I001", "PTH100", "RET504", "SIM102", "SIM103"]
+
+[tool.ruff.format]
+exclude = [".agents/azure/utility/scaffold/scripts/scaffold.py", ".agents/tests/generate_for_lint.py", ".agents/tests/test_declared_dependencies.py", ".agents/tests/test_scaffold.py"]
+
+[[tool.mypy.overrides]]
+module = "generate_for_lint"
+disable_error_code = ["no-any-return", "type-arg"]
+
+[[tool.mypy.overrides]]
+module = "scaffold"
+disable_error_code = ["arg-type", "assignment", "attr-defined", "call-overload", "misc", "no-any-return", "no-untyped-def", "return-value", "type-arg", "unreachable"]
+
+[[tool.mypy.overrides]]
+module = "test_declared_dependencies"
+disable_error_code = ["no-untyped-def"]
+
+[[tool.mypy.overrides]]
+module = "test_scaffold"
+disable_error_code = ["arg-type", "attr-defined", "list-item", "no-any-return", "no-untyped-def", "type-arg", "union-attr", "var-annotated"]
+
+[[tool.python-standards.exceptions]]
+path = ".agents/tests/test_scaffold.py"
+rule = "PY016"
+reason = "Existing test reads or replaces process state at a command boundary."
