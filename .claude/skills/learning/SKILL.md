@@ -1,6 +1,6 @@
 ---
 name: learning
-description: Use for Azure teaching, learner progress or convention changes; follow the requested authoring mode and agreed learning procedure.
+description: Use for any Azure task, lesson, review or convention change; follow the requested authoring mode and agreed learning procedure.
 kind: knowledge
 domain: azure
 profile: knowledge
