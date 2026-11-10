@@ -1,6 +1,6 @@
 ---
 name: libraries
-description: Tommy's agreed Azure dependency policy — when to take a dependency and which are chosen. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
+description: Use when choosing Azure libraries; no library rules are agreed yet.
 kind: contract
 domain: azure
 profile: core

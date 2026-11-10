@@ -1,6 +1,6 @@
 ---
 name: testing
-description: Tommy's agreed Azure testing — test tiers, their naming, layout and fixtures. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
+description: Use when adding Azure testing guidance; no test rules are agreed yet.
 kind: contract
 domain: azure
 profile: core
