@@ -1,6 +1,6 @@
 ---
 name: direction
-description: Where Tommy is headed with Azure — the goal, the skill tree being worked through, and the references every explanation and convention cites. Use when choosing or sequencing what to learn next, or when sourcing a Azure explanation or a proposed convention.
+description: Use when planning Azure lessons or sourcing an explanation; read the curriculum, learning goal and agreed primary references.
 kind: knowledge
 domain: azure
 profile: knowledge

@@ -1,6 +1,6 @@
 ---
 name: security
-description: Tommy's agreed Azure security — managed identities per workload, least-scope data-plane roles, no stored secrets, Entra-only Postgres, GitHub OIDC deploys and private networking for data services. Read before writing or reviewing Azure identity, role assignments, secrets, deploy authentication or network exposure; nothing applies until it is recorded here.
+description: Use when changing Azure identities, RBAC, secrets, OIDC or network exposure; apply the selected security and propagation safeguards.
 kind: contract
 domain: azure
 profile: core
@@ -14,6 +14,11 @@ provenance: house
 Owns identities, role assignments, secrets, deploy authentication and network exposure.
 
 ## Agreed
+
+```text
+Workload -> user-assigned identity -> narrow data-plane role at the resource scope
+Deployment -> GitHub OIDC federated credential -> deployment identity
+```
 
 - Each workload gets one user-assigned identity, plus a separate migrator identity where schema rights
   matter. The app identity holds data rights only. Source: Microsoft Entra docs, "Managed identities best

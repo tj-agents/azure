@@ -1,6 +1,6 @@
 ---
 name: direction
-description: Where Tommy is headed with Azure — the goal, the skill tree being worked through, and the references every explanation and convention cites. Use when choosing or sequencing what to learn next, or when sourcing a Azure explanation or a proposed convention.
+description: Use when planning Azure lessons or sourcing an explanation; read the curriculum, learning goal and agreed primary references.
 kind: knowledge
 domain: azure
 profile: knowledge
@@ -39,6 +39,10 @@ production estate. Practice happens only in the personal account.
 Update a row's status when Tommy levels up an area.
 
 ## The rule
+
+```text
+Azure topic not on the proven-knowledge record -> teach the topic, then ask Tommy to explain it back or write the next piece
+```
 
 These projects are for learning, not output. A slower path that Tommy understands beats a fast one they do
 not. Check that it landed: ask them to explain it back, or to write the next piece before you show yours.
