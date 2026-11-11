@@ -1,6 +1,6 @@
 ---
 name: knowledge
-description: Tommy's proven Azure level — what they are fluent with (✅) and what they have met but are shaky on (🟡). The only source of truth for what Tommy knows in Azure; read it before teaching, reviewing or handing over Azure work, and change it only under `azure:learning`'s Progress rules.
+description: Use before tailoring an Azure lesson or updating progress; read demonstrated competency and require learner evidence for promotion.
 kind: knowledge
 domain: azure
 profile: knowledge

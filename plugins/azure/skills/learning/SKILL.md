@@ -1,6 +1,6 @@
 ---
 name: learning
-description: How to work with Tommy on Azure — learning mode by default (Tommy writes the code; you explain, review and unblock), delivery mode only when asked, teach anything absent from `azure:knowledge` before relying on it, and the procedure by which a Azure convention is agreed and recorded. Use for any Azure task, explanation, review or handoff, and whenever a Azure convention is proposed or changed.
+description: Use for any Azure task, lesson, review or convention change; follow the requested authoring mode and agreed learning procedure.
 kind: knowledge
 domain: azure
 profile: knowledge

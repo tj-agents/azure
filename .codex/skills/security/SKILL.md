@@ -1,6 +1,6 @@
 ---
 name: security
-description: Tommy's agreed Azure security — managed identities per workload, least-scope data-plane roles, no stored secrets, Entra-only Postgres, GitHub OIDC deploys and private networking for data services. Read before writing or reviewing Azure identity, role assignments, secrets, deploy authentication or network exposure; nothing applies until it is recorded here.
+description: Use when changing Azure identities, RBAC, secrets, OIDC or network exposure; apply the selected security and propagation safeguards.
 kind: contract
 domain: azure
 profile: core

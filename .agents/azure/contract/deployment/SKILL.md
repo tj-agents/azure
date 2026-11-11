@@ -1,6 +1,6 @@
 ---
 name: deployment
-description: Tommy's agreed Azure deployment — environments and regions as configuration, remote state with Entra auth, the foundation bootstrap, the plan-then-apply CI flow and observability wiring. Read before writing or reviewing Azure state, environments, deploy workflows or telemetry; nothing applies until it is recorded here.
+description: Use when changing Azure environments, Terraform state, deploy workflows or telemetry; apply the agreed plan/apply and bootstrap policy.
 kind: contract
 domain: azure
 profile: core
@@ -14,6 +14,11 @@ provenance: house
 Owns environments, Terraform state, the deploy flow and observability wiring.
 
 ## Agreed
+
+```text
+Pull request -> Terraform plan against remote state
+main -> save the plan, then apply it through a protected environment
+```
 
 - Environment and region are input variables. Per-environment values that are not secret live in
   `infra/env/<env>.tfvars`, and there are no workspaces. Environment-dependent defaults, such as SKU and
