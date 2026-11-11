@@ -1,6 +1,6 @@
 ---
 name: errors
-description: Tommy's agreed Azure error handling — error types, propagation and failure policy. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
+description: Use when adding Azure error guidance; no error rules are agreed yet.
 kind: contract
 domain: azure
 profile: core
