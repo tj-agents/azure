@@ -1,7 +1,7 @@
 ---
 name: deployment
 description: Tommy's agreed Azure deployment — environments and regions as configuration, remote state with Entra auth, the foundation bootstrap, the plan-then-apply CI flow and observability wiring. Read before writing or reviewing Azure state, environments, deploy workflows or telemetry; nothing applies until it is recorded here.
-kind: contract
+kind: standard
 domain: azure
 profile: core
 applicability: Azure projects
@@ -38,3 +38,10 @@ Owns environments, Terraform state, the deploy flow and observability wiring.
   - Diagnostic settings send `allLogs` plus `AllMetrics` to the workspace from Postgres, Key Vault and
     Service Bus.
   - Source: Azure Monitor docs.
+
+```text
+Environment: ci; region: uks.
+Configuration: non-secret values in infra/env/ci.tfvars.
+Apply: main plans to a saved file, then applies that file through the protected environment.
+Concurrency: cancel-in-progress remains false for the apply flow.
+```

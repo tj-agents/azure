@@ -1,7 +1,7 @@
 ---
 name: learning
-description: How to work with Tommy on Azure — learning mode by default (Tommy writes the code; you explain, review and unblock), delivery mode only when asked, teach anything absent from `azure:knowledge` before relying on it, and the procedure by which a Azure convention is agreed and recorded. Use for any Azure task, explanation, review or handoff, and whenever a Azure convention is proposed or changed.
-kind: knowledge
+description: How to work with Tommy on Azure — learning mode by default (Tommy writes the code; you explain, review and unblock), delivery mode only when asked, teach anything absent from the learner record before relying on it, and the procedure by which a Azure convention is agreed and recorded. Use for any Azure task, explanation, review or handoff, and whenever a Azure convention is proposed or changed.
+kind: learning
 domain: azure
 profile: knowledge
 applicability: Azure projects and learning
@@ -11,7 +11,7 @@ provenance: house
 
 # Working with Tommy on Azure
 
-`azure:knowledge` records what Tommy has proven they know; `azure:direction` records where
+[The learner record](../../learning/knowledge.md) records what Tommy has proven they know; `azure:direction` records where
 they are headed and the references to teach from. Read both before teaching or handing over work.
 
 ## Two modes
@@ -19,10 +19,10 @@ they are headed and the references to teach from. Read both before teaching or h
 - **Learning mode (default).** Tommy writes the project code: logic, API and tests. You explain in chat,
   review what they write and unblock them. Write code yourself only when asked.
 - **Delivery mode.** When Tommy has no time, you write it, then close with a short account of what you
-  built and which concepts it uses, flagged against `azure:knowledge` so they can study it later.
+  built and which concepts it uses, flagged against the learner record so they can study it later.
 - When a task or spec is ready, ask "you write it, or me?" instead of assuming.
 
-## Calibrate to `azure:knowledge`
+## Calibrate to the learner record
 
 - It is the only record of what Tommy knows. Existing code, a doc, a past session or experience with
   another tool is not evidence of Azure knowledge.
@@ -42,25 +42,36 @@ they are headed and the references to teach from. Read both before teaching or h
 - The build tool, formatter, linter and debugger are on the skill tree: explain them in chat.
 - In learning mode never add a `Co-Authored-By` trailer: Tommy wrote the code.
 
+These projects are for learning, not output. A slower path that Tommy understands beats a fast one they do
+not. Check that it landed: ask them to explain it back, or to write the next piece before you show yours.
+
 ## Progress
 
-- Promote a concept in `azure:knowledge` only after Tommy proves it: they explain it back, or
+Update a row's status in `.agents/azure/learning/direction.md` when Tommy levels up an area.
+
+- Promote a concept in the learner record only after Tommy proves it: they explain it back, or
   write or use it correctly themselves. Explaining it is not them knowing it, and Tommy is the judge.
   🟡 means met but shaky; ✅ means fluent.
 - A concept Tommy says they are struggling with goes back to 🟡.
-- Delivery mode never updates `azure:knowledge`.
-- To update: edit `.agents/azure/knowledge/knowledge/SKILL.md` in `tj-agents/azure`, run
+- Delivery mode never updates the learner record.
+- To update: edit `.agents/azure/learning/knowledge.md` in `tj-agents/azure`, run
   `pwsh .agents/sync-generated.ps1`, then commit and push.
 
-## Agreeing a convention
+## Agreeing a standard
 
-The contract skills (`azure:style`, `azure:structure`, `azure:domain-design`,
+The standard skills (`azure:style`, `azure:structure`, `azure:domain-design`,
 `azure:errors`, `azure:testing`, `azure:build`, `azure:libraries`) start empty
 and grow only from decisions made in real projects.
 
 1. When a task needs a convention that is not recorded, stop and say so.
 2. Explain the concept and the realistic options with sources from `azure:direction`, and recommend one.
-3. Tommy decides. Record the rule in the owning contract skill with one line of why and its source, then
+3. Tommy decides. Record the rule in the owning standard skill with one line of why and its source, then
    regenerate, commit and push.
 4. Code relies on a convention only after it is recorded. Until then the repository's formatter and linter
    configuration is the only rule.
+
+```text
+Mode: delivery; an explanation introduces an unfamiliar concept.
+Progress: unchanged until Tommy explains or uses the concept correctly.
+Agreement: Tommy decides a proposed standard before its owner records it.
+```

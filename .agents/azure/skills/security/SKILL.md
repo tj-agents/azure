@@ -1,7 +1,7 @@
 ---
 name: security
 description: Tommy's agreed Azure security — managed identities per workload, least-scope data-plane roles, no stored secrets, Entra-only Postgres, GitHub OIDC deploys and private networking for data services. Read before writing or reviewing Azure identity, role assignments, secrets, deploy authentication or network exposure; nothing applies until it is recorded here.
-kind: contract
+kind: standard
 domain: azure
 profile: core
 applicability: Azure projects
@@ -42,3 +42,9 @@ Owns identities, role assignments, secrets, deploy authentication and network ex
   - Layout: VNet `10.0.0.0/16`, `cae` `10.0.0.0/23`, `private-endpoints` `10.0.2.0/24`.
   - When off: the public variant for throwaway sandboxes.
   - Source: Azure Private Link docs.
+
+```text
+Workload: one user-assigned app identity.
+Role scope: its required topic, container or vault.
+A Contributor grant to that workload does not meet the recorded data-plane role rule.
+```

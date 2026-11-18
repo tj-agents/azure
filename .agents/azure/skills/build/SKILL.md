@@ -1,7 +1,7 @@
 ---
 name: build
 description: Tommy's agreed Azure build — Terraform and provider pins, the lock file, the provider block and the fmt, init and validate gate. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
-kind: contract
+kind: standard
 domain: azure
 profile: core
 applicability: Azure projects
@@ -27,3 +27,10 @@ Owns the toolchain pin, build configuration, the verification gate and CI.
 - The gate for every root is `terraform fmt -check -recursive`, then `init -backend=false`, then `validate`,
   run locally and in CI. Source: house.
 - A new workload starts from `azure:scaffold`. Source: house.
+
+```text
+Root gate: terraform fmt -check -recursive
+Then: terraform init -backend=false
+Then: terraform validate
+Run the same gate locally and in CI for each Terraform root.
+```

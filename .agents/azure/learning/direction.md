@@ -1,17 +1,4 @@
----
-name: direction
-description: Where Tommy is headed with Azure — the goal, the skill tree being worked through, and the references every explanation and convention cites. Use when choosing or sequencing what to learn next, or when sourcing a Azure explanation or a proposed convention.
-kind: knowledge
-domain: azure
-profile: knowledge
-applicability: Azure learning
-requires: azure
-provenance: house
----
-
-# Where Tommy is headed with Azure
-
-`azure:knowledge` tracks where Tommy is now; this tracks where they are going.
+# Azure learning direction
 
 ## The goal
 
@@ -36,17 +23,3 @@ production estate. Practice happens only in the personal account.
 | 11 | Service Bus topics, subscriptions, filters and dead-lettering | Not started |
 | 12 | App Service plans, web apps and slot swaps | Not started |
 
-Update a row's status when Tommy levels up an area.
-
-## The rule
-
-These projects are for learning, not output. A slower path that Tommy understands beats a fast one they do
-not. Check that it landed: ask them to explain it back, or to write the next piece before you show yours.
-
-## References
-
-- Microsoft Learn, Azure documentation: the service docs and the Cloud Adoption Framework naming and tagging
-  guidance.
-- Azure Well-Architected Framework.
-- HashiCorp Terraform documentation, and the `azurerm` provider and backend documentation.
-- GitHub Docs, "Configuring OpenID Connect in Azure", and the GitHub changelog.

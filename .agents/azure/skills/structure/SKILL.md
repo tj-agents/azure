@@ -1,7 +1,7 @@
 ---
 name: structure
 description: Tommy's agreed Azure project structure — the foundation and instance Terraform roots, how they find each other, file layout, ephemeral instances and where Service Bus topics and subscriptions live. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
-kind: contract
+kind: standard
 domain: azure
 profile: core
 applicability: Azure projects

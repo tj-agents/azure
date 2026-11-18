@@ -1,7 +1,7 @@
 ---
 name: explanation
 description: How Terraform is quoted when explaining Azure infrastructure code. Use when an explanation shows Terraform/HCL.
-kind: contract
+kind: standard
 domain: azure
 profile: core
 applicability: Azure projects

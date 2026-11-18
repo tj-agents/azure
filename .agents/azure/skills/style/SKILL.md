@@ -1,7 +1,7 @@
 ---
 name: style
 description: Tommy's agreed Azure style — resource naming, region codes, tags, formatting and variable declarations. Read before writing or reviewing Azure that touches it; nothing applies until it is recorded here.
-kind: contract
+kind: standard
 domain: azure
 profile: core
 applicability: Azure projects
@@ -29,3 +29,9 @@ Owns naming, formatting, comments and lint policy.
   tagging strategy".
 - `terraform fmt` is the formatter. Every variable has a `type`, a `description` and, where the value is
   constrained, a `validation`. Source: Terraform docs, "Input variables".
+
+```text
+Inputs: region uks, environment ci, name demo, resource type rg.
+Name: uks-ci-demo-rg.
+Location: uksouth, from the recorded region mapping.
+```
