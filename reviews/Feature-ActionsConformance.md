@@ -1,8 +1,8 @@
 # Code review — Feature/ActionsConformance
 
 **Review status:** `complete`
-**Reviewed up to commit:** `caaa1430d8d96cb9ddf6cae94911368e41784f05`  `(2026-10-13)`
-**Security-reviewed up to commit:** `caaa1430d8d96cb9ddf6cae94911368e41784f05`  `(2026-10-13)`
+**Reviewed up to commit:** `a8617c44cf06df24f3ea628be136f8c7fc1a830f`  `(2026-10-13)`
+**Security-reviewed up to commit:** `a8617c44cf06df24f3ea628be136f8c7fc1a830f`  `(2026-10-13)`
 **Judgment:** `approved`
 
 ## Review pass 1 — 2026-10-13 — full, at `4a93d4b`

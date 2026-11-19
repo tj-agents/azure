@@ -375,7 +375,7 @@ B001 is repaired by guarding effective-settings key resolution with dictionary c
 
 ## Delivery checkpoint - 2026-10-13
 
-Sticky settings and B001 merged in PR 7 at 881ac901118a953b6d6ef0d5651f483e02823bf8. Reviewed head ccf7bf13b403d923b59f3004479738f4d7604761 has independent general and contract approval, including the test cleanup delta. Final-head CI passed the complete scaffold/Terraform suite on both operating systems, Actions lint and host verification. Nine focused tests, generated freshness and pinned kit conformance passed locally; local Terraform attempts failed on workstation disk exhaustion. Primary main is current and clean; the merged branch and worktree are removed. No publish workflow exists.
+Sticky settings and B001 merged in PR 7 at 2955b3eeb72067c0e3757336537b88b92789d71d. Reviewed head f5f9a9b30210ed6bb3dadbac8e0c20d5ddc26510 has independent general and contract approval, including the test cleanup delta. Final-head CI passed the complete scaffold/Terraform suite on both operating systems, Actions lint and host verification. Nine focused tests, generated freshness and pinned kit conformance passed locally; local Terraform attempts failed on workstation disk exhaustion. Primary main is current and clean; the merged branch and worktree are removed. No publish workflow exists.
 
 Current goal order follows the canonical standards handoff: finish and merge dotnet snippet gate, then github-actions whole-workflow ownership, then the single Web API boilerplate scaffold. No additional native CLI sessions.
 
